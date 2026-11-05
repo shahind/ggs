@@ -54,3 +54,12 @@ brightness-as-alpha transparency (owner: fine).
 1 git -> 2 item model + app shell -> 3 wizard, chat actions, progress, errors -> 4 body/pose editor + single
 image -> 5 templates + sliced sheets + animation library + export -> 6 frame by frame + VFX flipbooks ->
 7 installer. Text-to-animation (M10) after that.
+
+## Status (2026-11-04)
+- Done: own git repo; project items with chat versions (`ggs asset ...`); app shell (start screen, tree, chat
+  workspace, wizard tiles, Refine/Regenerate/Variations, Advanced, progress, plain errors); characters way **a**
+  (front-view rig with T/A-pose, side poses, body & pose editor, single image + skeleton.json, pose QA).
+- Next: way **b** (slice templates, model-drawn sheets, animation library, multi-clip export), way **c** in the
+  character workspace, VFX flipbooks, installer.
+- Known: chibi T-pose can grow extra hands at the sides (the limb check sees missing limbs, not extra ones);
+  the classic Animate and Styles pages are still the old look inside the new shell.
