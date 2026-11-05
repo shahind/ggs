@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from ggs.ui.icons import icon
 from ggs.ui.kinds import KINDS, SIZE_LABELS, kind
 
 
@@ -45,7 +46,9 @@ class NewItemDialog(QDialog):
         self.kinds = QButtonGroup(self)
         self.kinds.setExclusive(True)
         for i, k in enumerate(KINDS):
-            b = tile(f"{k.icon}  {k.label}", "", 200, 64)
+            b = tile(k.label, "", 200, 64)
+            b.setIcon(icon(k.icon))
+            b.setIconSize(QSize(36, 36))
             b.setToolTip(k.hint)
             b.setProperty("kind", k.id)
             self.kinds.addButton(b)

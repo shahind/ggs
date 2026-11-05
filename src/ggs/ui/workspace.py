@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 
 from ggs.ui import commands as C
 from ggs.ui.errors import friendly_error
+from ggs.ui.icons import icon, pixmap
 from ggs.ui.jobs import Job, JobQueue
 from ggs.ui.kinds import SIZE_LABELS, kind
 from ggs.ui.theme import BAD, MUTED
@@ -145,17 +146,21 @@ class ItemWorkspace(QWidget):
         self.title.setObjectName("h2")
         self.kind = QLabel()
         self.kind.setObjectName("chip")
+        self.kind_icon = QLabel()
         head.addWidget(self.title)
+        head.addWidget(self.kind_icon)
         head.addWidget(self.kind)
         head.addStretch(1)
         self.size_group = QButtonGroup(self)
         self.size_box = QHBoxLayout()
         head.addLayout(self.size_box)
         self.export_btn = QPushButton("Export")
+        self.export_btn.setIcon(icon("export"))
         self.export_btn.setObjectName("primary")
         self.export_btn.clicked.connect(self._export)
         head.addWidget(self.export_btn)
         adv = QPushButton("Advanced")
+        adv.setIcon(icon("advanced"))
         adv.setObjectName("flat")
         adv.setCheckable(True)
         adv.toggled.connect(self.adv.setVisible)
@@ -205,13 +210,16 @@ class ItemWorkspace(QWidget):
         box.addWidget(self.input, 1)
         col = QVBoxLayout()
         self.send = QPushButton("Send")
+        self.send.setIcon(icon("send"))
         self.send.setObjectName("primary")
         self.send.clicked.connect(self._send)
         row2 = QHBoxLayout()
-        self.regen = QPushButton("↻ Regenerate")
+        self.regen = QPushButton("Regenerate")
+        self.regen.setIcon(icon("regenerate"))
         self.regen.setToolTip("Draw it again with a new seed")
         self.regen.clicked.connect(lambda: self._run("regenerate"))
         self.vars = QPushButton("Variations")
+        self.vars.setIcon(icon("variations"))
         self.vars.setToolTip("Several new versions to choose from")
         self.vars.clicked.connect(lambda: self._run("variations"))
         row2.addWidget(self.regen)
@@ -230,7 +238,8 @@ class ItemWorkspace(QWidget):
         self.rec = ItemRecord.model_validate_json((self.dir / "item.json").read_text(encoding="utf-8"))
         k = kind(self.rec.asset_class)
         self.title.setText(self.rec.name)
-        self.kind.setText(f"{k.icon} {k.label}")
+        self.kind.setText(k.label)
+        self.kind_icon.setPixmap(pixmap(k.icon, 22))
         self._sizes(k.sizes)
         if self.rec.settings.style:
             i = self.adv.style.findData(self.rec.settings.style)

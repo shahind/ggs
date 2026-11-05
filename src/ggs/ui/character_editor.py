@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QPointF, Qt, QTimer, Signal
+from PySide6.QtCore import QPointF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ggs.ui.icons import icon
 from ggs.ui.theme import ACCENT
 
 SLIDERS = [("head", "Head"), ("torso", "Body"), ("arms", "Arms"), ("legs", "Legs"), ("width", "Build")]
@@ -35,6 +36,7 @@ def _section(title: str, on_save) -> QWidget:
     lab = QLabel(title)
     lab.setStyleSheet("font-weight: 600;")
     save = QPushButton("Save\u2026")
+    save.setIcon(icon("save"))
     save.setObjectName("flat")
     save.setToolTip(f"Save the current {title.lower()} to reuse it")
     save.clicked.connect(lambda: on_save())
@@ -143,6 +145,8 @@ class BodyPoseEditor(QFrame):
         row = QHBoxLayout()
         for v, label in (("front", "Front"), ("side", "Side")):
             b = _small_tile(label)
+            b.setIcon(icon(v))
+            b.setIconSize(QSize(22, 22))
             b.setProperty("view", v)
             b.setChecked(v == self.cs.view)
             self.views.addButton(b)

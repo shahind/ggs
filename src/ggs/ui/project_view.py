@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from ggs.ui import commands as C
+from ggs.ui.icons import icon
 from ggs.ui.jobs import Job, JobQueue
 from ggs.ui.kinds import kind
 from ggs.ui.widgets import checker_pixmap
@@ -58,7 +59,8 @@ class ProjectView(QWidget):
         lay.setContentsMargins(12, 10, 12, 12)
 
         top = QHBoxLayout()
-        home = QPushButton("← Projects")
+        home = QPushButton("Projects")
+        home.setIcon(icon("projects"))
         home.setObjectName("flat")
         home.clicked.connect(self.back.emit)
         self.name = QLabel()
@@ -72,7 +74,9 @@ class ProjectView(QWidget):
             self.model.addItem(MODEL_LABELS.get(m, m), m)
         self.model.currentIndexChanged.connect(self._model_changed)
         top.addWidget(self.model)
-        settings = QPushButton("⚙")
+        settings = QPushButton()
+        settings.setIcon(icon("settings"))
+        settings.setIconSize(QSize(22, 22))
         settings.setToolTip("Settings")
         settings.setObjectName("flat")
         settings.clicked.connect(self._settings)
@@ -83,7 +87,9 @@ class ProjectView(QWidget):
         left = QWidget()
         left.setObjectName("panel")
         lv = QVBoxLayout(left)
-        new = QPushButton("+  New")
+        new = QPushButton("New")
+        new.setIcon(icon("new"))
+        new.setIconSize(QSize(22, 22))
         new.setObjectName("primary")
         new.clicked.connect(lambda: self.new_item())
         lv.addWidget(new)
@@ -116,14 +122,14 @@ class ProjectView(QWidget):
         self.model.setCurrentIndex(max(0, i))
         self.model.blockSignals(False)
         self.tree.clear()
-        chars = QTreeWidgetItem(self.tree, ["\U0001F9CD  Characters"])
-        chars.setData(0, ROLE_NODE, "characters")
-        assets = QTreeWidgetItem(self.tree, ["\U0001F4E6  Assets"])
-        assets.setData(0, ROLE_NODE, "assets")
-        anims = QTreeWidgetItem(self.tree, ["\U0001F3AC  Animations"])
-        anims.setData(0, ROLE_NODE, "animations")
-        styles = QTreeWidgetItem(self.tree, ["\U0001F3A8  Styles"])
-        styles.setData(0, ROLE_NODE, "styles")
+        sections = {}
+        for key, label in (("characters", "Characters"), ("assets", "Assets"), ("animations", "Animations"),
+                           ("styles", "Styles")):
+            node = QTreeWidgetItem(self.tree, [label])
+            node.setIcon(0, icon(key))
+            node.setData(0, ROLE_NODE, key)
+            sections[key] = node
+        chars, assets, anims, styles = (sections[k] for k in ("characters", "assets", "animations", "styles"))
         for s in _styles(self.project):
             QTreeWidgetItem(styles, [s]).setData(0, ROLE_NODE, "styles")
         groups = {}
@@ -140,7 +146,8 @@ class ProjectView(QWidget):
                     target = it
                 continue
             if k.id not in groups:
-                groups[k.id] = QTreeWidgetItem(assets, [f"{k.icon}  {k.label}"])
+                groups[k.id] = QTreeWidgetItem(assets, [k.label])
+                groups[k.id].setIcon(0, icon(k.icon))
                 groups[k.id].setData(0, ROLE_NODE, "group")
             it = QTreeWidgetItem(groups[k.id], [rec.name])
             it.setData(0, ROLE_DIR, str(d))

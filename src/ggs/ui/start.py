@@ -77,8 +77,9 @@ class ProjectCard(QFrame):
         if latest is not None:
             thumb.setPixmap(checker_pixmap(latest, 120))
         else:
-            thumb.setText("\U0001F3AE")
-            thumb.setStyleSheet("font-size: 40pt;")
+            from ggs.ui.icons import pixmap
+
+            thumb.setPixmap(pixmap("assets", 96))
         lay.addWidget(thumb, 1)
         meta = yaml.safe_load((project / ".ggs" / "project.yaml").read_text(encoding="utf-8")) or {}
         name = QLabel(meta.get("name") or project.name)
