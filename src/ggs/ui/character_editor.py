@@ -18,15 +18,30 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSlider,
     QVBoxLayout,
+    QWidget,
 )
 
 from ggs.ui.theme import ACCENT
 
-BODY_TILES = [("standard", "Standard"), ("heroic", "Heroic"), ("chibi", "Chibi"), ("stocky", "Stocky"),
-              ("lanky", "Lanky"), ("child", "Child")]
 SLIDERS = [("head", "Head"), ("torso", "Body"), ("arms", "Arms"), ("legs", "Legs"), ("width", "Build")]
 DRAG_BONES = ("hand", "forearm", "upper_arm", "shin", "thigh", "foot", "head")
 PREVIEW = 320
+
+
+def _section(title: str, on_save) -> QWidget:
+    w = QWidget()
+    row = QHBoxLayout(w)
+    row.setContentsMargins(0, 6, 0, 0)
+    lab = QLabel(title)
+    lab.setStyleSheet("font-weight: 600;")
+    save = QPushButton("Save\u2026")
+    save.setObjectName("flat")
+    save.setToolTip(f"Save the current {title.lower()} to reuse it")
+    save.clicked.connect(lambda: on_save())
+    row.addWidget(lab)
+    row.addStretch(1)
+    row.addWidget(save)
+    return w
 
 
 def _small_tile(text: str) -> QPushButton:
@@ -103,9 +118,11 @@ class BodyPoseEditor(QFrame):
 
     changed = Signal(object)
 
-    def __init__(self, settings):
+    def __init__(self, settings, project=None):
         super().__init__()
         from ggs.rig.body import PRESETS
+
+        self.project = project
 
         self.setObjectName("panel")
         self.setFixedWidth(PREVIEW + 24)
@@ -132,21 +149,16 @@ class BodyPoseEditor(QFrame):
             row.addWidget(b)
         self.views.buttonClicked.connect(self._view)
         lay.addLayout(row)
-        self.pose_box = QHBoxLayout()
+        lay.addWidget(_section("Pose", self._save_pose))
+        self.pose_box = QGridLayout()
         self.poses = QButtonGroup(self)
         self.poses.buttonClicked.connect(self._pose)
         lay.addLayout(self.pose_box)
-
-        grid = QGridLayout()
+        lay.addWidget(_section("Body", self._save_body))
+        self.body_box = QGridLayout()
         self.bodies = QButtonGroup(self)
-        for i, (bid, label) in enumerate(BODY_TILES):
-            b = _small_tile(label)
-            b.setProperty("body", bid)
-            b.setChecked(bid == self.cs.body_preset and not self.cs.body)
-            self.bodies.addButton(b)
-            grid.addWidget(b, i // 3, i % 3)
         self.bodies.buttonClicked.connect(self._body)
-        lay.addLayout(grid)
+        lay.addLayout(self.body_box)
         self.sliders = {}
         for key, label in SLIDERS:
             r = QHBoxLayout()
@@ -165,6 +177,7 @@ class BodyPoseEditor(QFrame):
         self.timer.setInterval(120)
         self.timer.timeout.connect(self._render)
         self._fill_poses()
+        self._fill_bodies()
         self._set_sliders()
         self._render()
 
@@ -183,22 +196,117 @@ class BodyPoseEditor(QFrame):
             sl.setValue(round(getattr(b, key) * 100))
             sl.blockSignals(False)
 
-    def _fill_poses(self) -> None:
-        from ggs.rig.poses import LABELS, POSES
-
-        for b in self.poses.buttons():
-            self.poses.removeButton(b)
-        while self.pose_box.count():
-            it = self.pose_box.takeAt(0)
+    def _clear(self, group: QButtonGroup, box: QGridLayout) -> None:
+        for b in group.buttons():
+            group.removeButton(b)
+        while box.count():
+            it = box.takeAt(0)
             if it.widget():
                 it.widget().deleteLater()
-        current = self.cs.pose if isinstance(self.cs.pose, str) else None
-        for pid in POSES[self.cs.view]:
-            b = _small_tile(LABELS.get(pid, pid))
-            b.setProperty("pose", pid)
-            b.setChecked(pid == current)
+
+    def _saved_tile(self, saved, kind: str) -> QPushButton:
+        b = _small_tile(saved.name)
+        b.setProperty("saved", saved)
+        if saved.scope != "builtin":
+            where = "for all projects" if saved.scope == "global" else "in this project"
+            b.setToolTip(f"Saved {where}. Right-click to delete.")
+            b.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            b.customContextMenuRequested.connect(lambda _p, sv=saved: self._delete(kind, sv))
+        return b
+
+    def _fill_poses(self) -> None:
+        from ggs.library import list_poses
+
+        self._clear(self.poses, self.pose_box)
+        current = self.cs.pose
+        for i, saved in enumerate(list_poses(self.cs.view, self.project)):
+            b = self._saved_tile(saved, "pose")
+            if saved.scope == "builtin":
+                b.setChecked(saved.data.get("id") == current)
+            else:
+                b.setChecked(isinstance(current, dict) and current == saved.data["angles"])
             self.poses.addButton(b)
-            self.pose_box.addWidget(b)
+            self.pose_box.addWidget(b, i // 3, i % 3)
+
+    def _fill_bodies(self) -> None:
+        from ggs.library import list_bodies
+
+        self._clear(self.bodies, self.body_box)
+        for i, saved in enumerate(list_bodies(self.project)):
+            b = self._saved_tile(saved, "body")
+            if saved.scope == "builtin":
+                b.setChecked(not self.cs.body and saved.data["name"] == self.cs.body_preset)
+            else:
+                b.setChecked(bool(self.cs.body) and self.cs.body.get("name") == saved.name)
+            self.bodies.addButton(b)
+            self.body_box.addWidget(b, i // 3, i % 3)
+
+    def _ask_name(self, what: str):
+        from PySide6.QtWidgets import QCheckBox, QDialog, QDialogButtonBox, QLineEdit
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Save {what}")
+        v = QVBoxLayout(dlg)
+        name = QLineEdit()
+        name.setPlaceholderText(f"Name for this {what}")
+        everywhere = QCheckBox("Use it in all my projects")
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        for w in (name, everywhere, btns):
+            v.addWidget(w)
+        if dlg.exec() != QDialog.DialogCode.Accepted or not name.text().strip():
+            return None
+        return name.text().strip(), "global" if everywhere.isChecked() or self.project is None else "project"
+
+    def _save_pose(self, name: str | None = None, scope: str | None = None) -> None:
+        from ggs.library import save_pose
+        from ggs.rig.poses import pose_angles
+
+        got = (name, scope or ("project" if self.project else "global")) if name else self._ask_name("pose")
+        if not got:
+            return
+        try:
+            saved = save_pose(got[0], self.cs.view, pose_angles(self.cs.view, self.cs.pose), self.project, got[1])
+        except ValueError as exc:
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.information(self, "GGS", str(exc))
+            return
+        self.cs.pose = dict(saved.data["angles"])
+        self._fill_poses()
+        self._changed()
+
+    def _save_body(self, name: str | None = None, scope: str | None = None) -> None:
+        from ggs.library import save_body
+
+        got = (name, scope or ("project" if self.project else "global")) if name else self._ask_name("body shape")
+        if not got:
+            return
+        try:
+            saved = save_body(got[0], self.body_shape().model_dump(), self.project, got[1])
+        except ValueError as exc:
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.information(self, "GGS", str(exc))
+            return
+        self.cs.body = dict(saved.data)
+        self._fill_bodies()
+        self._changed()
+
+    def _delete(self, kind: str, saved) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        from ggs.library import delete_body, delete_pose
+
+        answer = QMessageBox.question(self, "GGS", f"Delete the saved {kind} '{saved.name}'?")
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        (delete_pose if kind == "pose" else delete_body)(saved.name, self.project, saved.scope)
+        if kind == "pose":
+            self._fill_poses()
+        else:
+            self._fill_bodies()
 
     def _view(self, b) -> None:
         from ggs.rig.poses import DEFAULT
@@ -209,12 +317,16 @@ class BodyPoseEditor(QFrame):
         self._changed()
 
     def _pose(self, b) -> None:
-        self.cs.pose = b.property("pose")
+        saved = b.property("saved")
+        self.cs.pose = saved.data["id"] if saved.scope == "builtin" else dict(saved.data["angles"])
         self._changed()
 
     def _body(self, b) -> None:
-        self.cs.body_preset = b.property("body")
-        self.cs.body = {}
+        saved = b.property("saved")
+        if saved.scope == "builtin":
+            self.cs.body_preset, self.cs.body = saved.data["name"], {}
+        else:
+            self.cs.body = dict(saved.data)
         self._set_sliders()
         self._changed()
 

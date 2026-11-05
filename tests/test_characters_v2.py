@@ -88,3 +88,52 @@ def test_editor_changes_pose_and_body(qapp, tmp_path):
     side = next(b for b in ed.views.buttons() if b.property("view") == "side")
     ed._view(side)
     assert ed.cs.view == "side" and ed.cs.pose == "idle" and len(ed.poses.buttons()) == 3
+
+
+@pytest.fixture()
+def library_home(tmp_path, monkeypatch):
+    import ggs.library as L
+
+    monkeypatch.setattr(L, "shared_dir", lambda: tmp_path / "home")
+    return tmp_path / "home"
+
+
+def test_library_save_list_delete(tmp_path, library_home):
+    from ggs import library as L
+
+    init_project(tmp_path / "g", "G")
+    p = tmp_path / "g"
+    names = [s.name for s in L.list_poses("front", p)]
+    assert names[:3] == ["T-pose", "A-pose", "Standing"]
+    L.save_pose("Wave", "front", {**pose_angles("front", "idle"), "upper_arm_r": -150}, p)
+    L.save_pose("Bow", "front", pose_angles("front", "idle"), p, scope="global")
+    L.save_pose("Crouch", "side", pose_angles("side", "idle"), p)
+    front = {s.name: s.scope for s in L.list_poses("front", p)}
+    assert front["Wave"] == "project" and front["Bow"] == "global" and "Crouch" not in front
+    assert "Bow" in {s.name for s in L.list_poses("front", tmp_path / "other")}  # global: every project
+    L.save_body("Giant", {"head": 0.8, "legs": 1.3, "width": 1.4}, p)
+    bodies = {s.name: s for s in L.list_bodies(p)}
+    assert bodies["Giant"].data["legs"] == 1.3 and "Chibi" in bodies
+    with pytest.raises(ValueError):
+        L.save_body("Bad", {"head": 9}, p)
+    with pytest.raises(ValueError):
+        L.save_pose("  ", "front", {}, p)
+    L.delete_pose("Wave", p)
+    assert "Wave" not in {s.name for s in L.list_poses("front", p)}
+
+
+def test_editor_saves_and_offers_presets(qapp, tmp_path, library_home):
+    from ggs.ui.character_editor import BodyPoseEditor
+
+    init_project(tmp_path / "g", "G")
+    ed = BodyPoseEditor(I.CharacterSettings(view="front", pose="a_pose"), tmp_path / "g")
+    n_poses, n_bodies = len(ed.poses.buttons()), len(ed.bodies.buttons())
+    ed._dragged("forearm_r", -120.0)
+    ed._save_pose("Salute")
+    assert len(ed.poses.buttons()) == n_poses + 1
+    assert ed.poses.checkedButton().property("saved").name == "Salute"
+    ed.sliders["legs"].setValue(150)
+    ed._save_body("Long legs")
+    assert len(ed.bodies.buttons()) == n_bodies + 1 and ed.cs.body["name"] == "Long legs"
+    other = BodyPoseEditor(I.CharacterSettings(view="front"), tmp_path / "g")  # a second character sees them
+    assert "Salute" in [b.property("saved").name for b in other.poses.buttons()]

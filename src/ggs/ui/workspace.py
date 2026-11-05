@@ -415,7 +415,7 @@ class CharacterWorkspace(ItemWorkspace):
         from ggs.items import CharacterSettings
         from ggs.ui.character_editor import BodyPoseEditor
 
-        self.editor = BodyPoseEditor(self.rec.settings.character or CharacterSettings())
+        self.editor = BodyPoseEditor(self.rec.settings.character or CharacterSettings(), self.project)
         self.editor.changed.connect(self._character_changed)
         self.layout().insertWidget(0, self.editor)
 
