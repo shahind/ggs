@@ -193,6 +193,10 @@ def check(app: Path) -> None:
     for args in (["rig", "validate", str(app / "rigs" / "humanoid_side_v1.yaml")], ["models", "status"]):
         r = subprocess.run([str(py), "-m", "ggs", *args], check=False, capture_output=True, text=True, cwd=str(app.parent))
         print(" ".join(args[:2]), "->", r.returncode, (r.stdout + r.stderr).strip().splitlines()[-1:])
+    # the check wrote byte-code caches (~35 MB) into the bundle; only ggs's own (compiled on purpose) stay
+    keep = app / "python" / "Lib" / "site-packages" / "ggs"
+    for d in [d for d in (app / "python").rglob("__pycache__") if keep not in d.parents]:
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def main() -> int:
