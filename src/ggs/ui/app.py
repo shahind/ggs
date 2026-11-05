@@ -73,9 +73,9 @@ class MainWindow(QMainWindow):
             if ok:
                 self.open_project(folder)
             else:
-                from ggs.ui.errors import friendly_error
+                from ggs.ui.errors import show_error
 
-                QMessageBox.information(self, "GGS", friendly_error("\n".join(job.output)))
+                show_error(self, "\n".join(job.output))
 
         job.done = done
         self.queue.submit(job)

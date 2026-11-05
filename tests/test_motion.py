@@ -111,7 +111,8 @@ def test_catalog_search_preview_and_add(monkeypatch, tmp_path):
     assert [m.id for _, m in catalog.search("", category="Fighting")] == ["02_01"]
     assert catalog.read_clip("demo/02_01").frame_count == 12
     out = catalog.add_to(["demo/01_01"], tmp_path / "proj" / "clips")
-    assert out[0].name == "walk_happily_demo_01_01.json"
+    assert out[0].name == "walk_happily.json"  # no source names in what the user sees
+    assert catalog.add_to(["demo/01_01"], tmp_path / "proj" / "clips")[0] == out[0]  # same motion: replaced
     meta = json.loads(out[0].with_suffix(".motion.json").read_text(encoding="utf-8"))
     assert meta["credit"] == "Demo credit"
     with pytest.raises(KeyError):

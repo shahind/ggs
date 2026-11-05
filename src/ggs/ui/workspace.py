@@ -1,11 +1,17 @@
-"""Item workspace: big preview + versions on top, the chat underneath, Advanced as a side drawer."""
+"""Item workspace: the picture in the middle, the prompt under it, Advanced as a side drawer.
+
+No chat and no stored versions: the history keeps how each drawing was made (``ggs.items``), so Previous / Next
+bring an earlier drawing back (from the cache, or drawn again). Regenerate sits by the picture: the same words,
+a new seed. Under the picture one prompt box (typos underlined) and two buttons: "Change it" edits the drawing on
+screen, "Draw new" starts over from the words in the box.
+Characters add the body & pose editor, "Use this design", and the Sliced version and Animate tabs.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -15,69 +21,19 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
-    QPlainTextEdit,
-    QProgressBar,
     QPushButton,
-    QScrollArea,
-    QSizePolicy,
     QSpinBox,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from ggs.ui import commands as C
-from ggs.ui.errors import friendly_error
 from ggs.ui.icons import icon, pixmap
-from ggs.ui.jobs import Job, JobQueue
+from ggs.ui.jobs import Job, JobQueue, run_on_stage
 from ggs.ui.kinds import SIZE_LABELS, kind
-from ggs.ui.theme import BAD, MUTED
-from ggs.ui.widgets import checker_pixmap
-
-
-class Bubble(QFrame):
-    """One chat message. App messages can carry version thumbnails and a hidden 'details' text."""
-
-    picked = Signal(int)
-
-    def __init__(self, text: str, user: bool, thumbs: list[tuple[int, Path]] = (), error: bool = False,
-                 details: str = ""):
-        super().__init__()
-        self.setObjectName("panel")
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 8, 10, 8)
-        lab = QLabel(text)
-        lab.setWordWrap(True)
-        lab.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        if error:
-            lab.setStyleSheet(f"color: {BAD};")
-        lay.addWidget(lab)
-        if thumbs:
-            row = QHBoxLayout()
-            for n, p in thumbs:
-                b = QPushButton()
-                b.setObjectName("flat")
-                b.setIcon(QIcon(checker_pixmap(p, 96)))
-                b.setIconSize(QSize(96, 96))
-                b.setToolTip(f"version {n}")
-                b.clicked.connect(lambda _=False, n=n: self.picked.emit(n))
-                row.addWidget(b)
-            row.addStretch(1)
-            lay.addLayout(row)
-        if details:
-            more = QPushButton("details")
-            more.setObjectName("flat")
-            box = QPlainTextEdit(details)
-            box.setReadOnly(True)
-            box.setVisible(False)
-            box.setFixedHeight(120)
-            more.clicked.connect(lambda: box.setVisible(not box.isVisible()))
-            lay.addWidget(more, 0, Qt.AlignmentFlag.AlignLeft)
-            lay.addWidget(box)
-        self.setMaximumWidth(620)
-        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Minimum)
-        self.user = user
+from ggs.ui.spell import PromptEdit
+from ggs.ui.widgets import ImageStage
 
 
 class Advanced(QFrame):
@@ -96,10 +52,6 @@ class Advanced(QFrame):
         self.seed.setRange(0, 999_999)
         f.addRow(self.fix_seed)
         f.addRow("Seed", self.seed)
-        self.count = QSpinBox()
-        self.count.setRange(2, 8)
-        self.count.setValue(3)
-        f.addRow("Variations", self.count)
         self.style = QComboBox()
         self.style.addItem("(no style)", None)
         for s in styles:
@@ -124,23 +76,123 @@ class Advanced(QFrame):
         return self.seed.value() if self.fix_seed.isChecked() else None
 
 
+class Placeholder(QWidget):
+    def __init__(self, text: str):
+        super().__init__()
+        lay = QVBoxLayout(self)
+        lab = QLabel(text)
+        lab.setObjectName("muted")
+        lab.setWordWrap(True)
+        lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(lab)
+
+
+def _flat(text: str, tip: str = "", ic: str | None = None) -> QPushButton:
+    b = QPushButton(text)
+    if ic:
+        b.setIcon(icon(ic))
+    b.setToolTip(tip)
+    return b
+
+
+class DrawPanel(QWidget):
+    """Picture + history arrows + Regenerate + prompt with Change it / Draw new. Shared by every item kind."""
+
+    def __init__(self, ws: ItemWorkspace):
+        super().__init__()
+        self.ws = ws
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.stage = ImageStage(empty="Nothing drawn yet.\nDescribe it below and press Draw.")
+        lay.addWidget(self.stage, 1)
+        row = QHBoxLayout()
+        self.prev = _flat("◀ Previous", "Show the drawing before this one")
+        self.prev.clicked.connect(lambda: ws.step(-1))
+        self.where = QLabel("")
+        self.where.setObjectName("muted")
+        self.next = _flat("Next ▶", "Show the next drawing")
+        self.next.clicked.connect(lambda: ws.step(1))
+        self.regen = _flat("Regenerate", "Draw the same description again with a new seed", "regenerate")
+        self.regen.clicked.connect(lambda: ws.run("regenerate"))
+        row.addWidget(self.prev)
+        row.addWidget(self.where)
+        row.addWidget(self.next)
+        row.addStretch(1)
+        row.addWidget(self.regen)
+        lay.addLayout(row)
+        self.caption = QLabel("")
+        self.caption.setObjectName("muted")
+        self.caption.setWordWrap(True)
+        self.caption.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        lay.addWidget(self.caption)
+        self.extra = QHBoxLayout()  # characters: "Use this design" and what comes after it
+        lay.addLayout(self.extra)
+        box = QHBoxLayout()
+        self.input = PromptEdit()
+        self.input.setFixedHeight(62)
+        self.input.submitted.connect(self._enter)
+        box.addWidget(self.input, 1)
+        col = QVBoxLayout()
+        self.change = QPushButton("Change it")
+        self.change.setIcon(icon("send"))
+        self.change.setObjectName("primary")
+        self.change.setToolTip("Edit the drawing on screen: type what to change, e.g. 'make the hat blue'")
+        self.change.clicked.connect(self._change)
+        self.new = QPushButton("Draw new")
+        self.new.setToolTip("Start over: a new drawing from the words in the box")
+        self.new.clicked.connect(self._new)
+        col.addWidget(self.change)
+        col.addWidget(self.new)
+        box.addLayout(col)
+        lay.addLayout(box)
+        self.typos = QLabel("")
+        self.typos.setStyleSheet("color: #ff8a8a;")
+        lay.addWidget(self.typos)
+        self.input.textChanged.connect(self._check_typos)
+
+    def _check_typos(self) -> None:
+        bad = self.input.has_typos()
+        self.typos.setText(("Check the spelling: " + ", ".join(bad) + " (right-click a word for fixes)")
+                           if bad else "")
+
+    def _enter(self) -> None:
+        (self._change if self.ws.rec.versions else self._new)()
+
+    def _change(self) -> None:
+        text = self.input.toPlainText().strip()
+        if text:
+            self.ws.run("refine", text)
+
+    def _new(self) -> None:
+        text = self.input.toPlainText().strip()
+        if text:
+            self.ws.run("new", text)
+
+    def set_busy(self, on: bool) -> None:
+        for b in (self.prev, self.next, self.regen, self.change, self.new):
+            b.setEnabled(not on)
+        if not on:
+            self.ws.refresh_buttons()
+
+
 class ItemWorkspace(QWidget):
-    changed = Signal()  # the item's versions changed (the tree refreshes its thumbnail)
+    changed = Signal()  # the item changed (the tree refreshes its thumbnail)
 
     def __init__(self, queue: JobQueue, project: Path, item_dir: Path, styles: list[str], models: list[str]):
         super().__init__()
         self.queue, self.project, self.dir = queue, Path(project), Path(item_dir)
         self.rec = None
-        self.shown: int | None = None
+        self.working = False
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
+        self.left = QVBoxLayout()  # characters put the body & pose editor here
+        root.addLayout(self.left)
         main = QVBoxLayout()
         root.addLayout(main, 1)
         self.adv = Advanced(styles, models)
         self.adv.setVisible(False)
         root.addWidget(self.adv)
 
-        # header
         head = QHBoxLayout()
         self.title = QLabel()
         self.title.setObjectName("h2")
@@ -150,13 +202,15 @@ class ItemWorkspace(QWidget):
         head.addWidget(self.title)
         head.addWidget(self.kind_icon)
         head.addWidget(self.kind)
+        self.tabs_box = QHBoxLayout()  # characters: Design | Sliced version | Animate
+        head.addSpacing(16)
+        head.addLayout(self.tabs_box)
         head.addStretch(1)
         self.size_group = QButtonGroup(self)
         self.size_box = QHBoxLayout()
         head.addLayout(self.size_box)
         self.export_btn = QPushButton("Export")
         self.export_btn.setIcon(icon("export"))
-        self.export_btn.setObjectName("primary")
         self.export_btn.clicked.connect(self._export)
         head.addWidget(self.export_btn)
         adv = QPushButton("Advanced")
@@ -165,69 +219,12 @@ class ItemWorkspace(QWidget):
         adv.setCheckable(True)
         adv.toggled.connect(self.adv.setVisible)
         head.addWidget(adv)
+        self.adv_btn = adv
         main.addLayout(head)
-
-        # preview + versions
-        self.preview = QLabel()
-        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview.setMinimumHeight(260)
-        self.preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        main.addWidget(self.preview, 3)
-        self.versions = QListWidget()
-        self.versions.setViewMode(QListWidget.ViewMode.IconMode)
-        self.versions.setFlow(QListWidget.Flow.LeftToRight)
-        self.versions.setWrapping(False)
-        self.versions.setIconSize(QSize(64, 64))
-        self.versions.setFixedHeight(104)
-        self.versions.setGridSize(QSize(80, 92))
-        self.versions.setMovement(QListWidget.Movement.Static)
-        self.versions.itemClicked.connect(lambda it: self._show_version(it.data(256)))
-        main.addWidget(self.versions)
-
-        # chat
-        self.chat_area = QScrollArea()
-        self.chat_area.setWidgetResizable(True)
-        self.chat_inner = QWidget()
-        self.chat_lay = QVBoxLayout(self.chat_inner)
-        self.chat_lay.addStretch(1)
-        self.chat_area.setWidget(self.chat_inner)
-        bar = self.chat_area.verticalScrollBar()
-        bar.rangeChanged.connect(lambda _a, hi: bar.setValue(hi))  # keep the newest message in view
-        main.addWidget(self.chat_area, 2)
-
-        # progress + input
-        self.progress_text = QLabel("")
-        self.progress_text.setObjectName("muted")
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 0)
-        self.progress.setTextVisible(False)
-        for w in (self.progress_text, self.progress):
-            w.setVisible(False)
-            main.addWidget(w)
-        box = QHBoxLayout()
-        self.input = QPlainTextEdit()
-        self.input.setFixedHeight(64)
-        box.addWidget(self.input, 1)
-        col = QVBoxLayout()
-        self.send = QPushButton("Send")
-        self.send.setIcon(icon("send"))
-        self.send.setObjectName("primary")
-        self.send.clicked.connect(self._send)
-        row2 = QHBoxLayout()
-        self.regen = QPushButton("Regenerate")
-        self.regen.setIcon(icon("regenerate"))
-        self.regen.setToolTip("Draw it again with a new seed")
-        self.regen.clicked.connect(lambda: self._run("regenerate"))
-        self.vars = QPushButton("Variations")
-        self.vars.setIcon(icon("variations"))
-        self.vars.setToolTip("Several new versions to choose from")
-        self.vars.clicked.connect(lambda: self._run("variations"))
-        row2.addWidget(self.regen)
-        row2.addWidget(self.vars)
-        col.addWidget(self.send)
-        col.addLayout(row2)
-        box.addLayout(col)
-        main.addLayout(box)
+        self.pages = QStackedWidget()
+        main.addWidget(self.pages, 1)
+        self.draw = DrawPanel(self)
+        self.pages.addWidget(self.draw)
         self.reload()
 
     # ------------------------------------------------------------------ data
@@ -244,25 +241,44 @@ class ItemWorkspace(QWidget):
         if self.rec.settings.style:
             i = self.adv.style.findData(self.rec.settings.style)
             self.adv.style.setCurrentIndex(max(0, i))
-        self.versions.clear()
-        for v in self.rec.versions:
-            if not v.file:
-                continue
-            it = QListWidgetItem(QIcon(checker_pixmap(self.dir / v.file, 64)), f"v{v.n}")
-            it.setData(256, v.n)
-            it.setToolTip(v.prompt + ("" if v.passed else "\n(did not pass the quality check)"))
-            self.versions.addItem(it)
-        self._rebuild_chat()
-        self._show_version(self.rec.current)
-        first = not self.rec.versions
-        self.input.setPlaceholderText(
-            "Describe it, then press Send" if first else "Say what to change, e.g. 'make it blue' (keeps the rest)")
-        if first and not self.input.toPlainText():
-            self.input.setPlainText(self.rec.description)
-        self.send.setText("Create" if first else "Refine")
-        self.regen.setEnabled(not first)
-        self.vars.setEnabled(bool(self.rec.description))
-        self.export_btn.setEnabled(self.rec.current is not None)
+        if not self.draw.input.toPlainText().strip():
+            self.draw.input.setPlainText(self.rec.description)
+        self.show_current()
+        self.refresh_buttons()
+
+    def show_current(self) -> None:
+        v = self.rec.get_version()
+        path = self.dir / v.file if v is not None and v.file else None
+        note = ""
+        if v is not None and not v.passed:
+            from ggs.items import friendly
+
+            note = "Did not pass the quality check: " + friendly(v.failures).split(". Try")[0]
+        self.draw.stage.set_image(path if path is not None and path.exists() else None, note)
+        if v is None:
+            self.draw.caption.setText("")
+        else:
+            parts = self.rec.design_text()
+            self.draw.caption.setText("Drawn from: " + "  →  ".join(parts))
+
+    def refresh_buttons(self) -> None:
+        ns = [v.n for v in self.rec.versions]
+        cur = self.rec.current
+        i = ns.index(cur) if cur in ns else -1
+        has = bool(ns) and i >= 0
+        d = self.draw
+        d.prev.setEnabled(has and i > 0 and not self.working)
+        d.next.setEnabled(has and i < len(ns) - 1 and not self.working)
+        d.where.setText(f"{i + 1} of {len(ns)}" if has else "")
+        d.regen.setEnabled(bool(self.rec.description) and has and not self.working)
+        d.change.setVisible(has)
+        d.new.setText("Draw new" if has else "Draw")
+        d.new.setObjectName("" if has else "primary")
+        d.new.style().unpolish(d.new)
+        d.new.style().polish(d.new)
+        d.input.setPlaceholderText("Type a change (e.g. 'make the hat blue') and press Change it, or new words "
+                                   "and press Draw new" if has else "Describe it, then press Draw")
+        self.export_btn.setEnabled(has and not self.working)
 
     def _sizes(self, sizes) -> None:
         for b in self.size_group.buttons():
@@ -280,157 +296,154 @@ class ItemWorkspace(QWidget):
             b.setFixedSize(52, 32)
             b.setStyleSheet("padding: 0px;")
             b.setToolTip(f"Export size: {SIZE_LABELS[s][1]}")
-            b.setProperty("tile_size", s)
             b.setChecked(s == self.rec.settings.size)
             b.toggled.connect(lambda on, s=s: on and self._set_size(s))
             self.size_group.addButton(b)
             self.size_box.addWidget(b)
 
-    def _set_size(self, size: str) -> None:
-        self.rec.settings.size = size
+    def _save(self) -> None:
         (self.dir / "item.json").write_text(self.rec.model_dump_json(indent=1), encoding="utf-8")
 
-    def _show_version(self, n: int | None) -> None:
-        self.shown = n
-        v = self.rec.get_version(n) if self.rec else None
-        if v is None or not v.file:
-            self.preview.setText("Nothing drawn yet. Describe it below and press Create.")
-            self.preview.setStyleSheet(f"color: {MUTED};")
-            return
-        self.preview.setStyleSheet("")
-        side = max(200, min(self.preview.width(), self.preview.height()) - 10)
-        self.preview.setPixmap(checker_pixmap(self.dir / v.file, side))
-        for i in range(self.versions.count()):
-            if self.versions.item(i).data(256) == n:
-                self.versions.setCurrentRow(i)
-
-    def resizeEvent(self, e) -> None:
-        super().resizeEvent(e)
-        if self.rec is not None:
-            self._show_version(self.shown)
-
-    def _rebuild_chat(self) -> None:
-        while self.chat_lay.count() > 1:
-            it = self.chat_lay.takeAt(1)
-            if it.widget():
-                it.widget().deleteLater()
-        for t in self.rec.chat:
-            thumbs = [(n, self.dir / v.file) for n in t.versions if (v := self.rec.get_version(n)) and v.file]
-            self._bubble(t.text, t.role == "user", thumbs)
-
-    def _bubble(self, text: str, user: bool, thumbs=(), error=False, details="") -> None:
-        b = Bubble(text, user, thumbs, error, details)
-        b.picked.connect(self._show_version)
-        row = QHBoxLayout()
-        if user:
-            row.addStretch(1)
-        row.addWidget(b)
-        if not user:
-            row.addStretch(1)
-        holder = QWidget()
-        holder.setLayout(row)
-        self.chat_lay.addWidget(holder)
+    def _set_size(self, size: str) -> None:
+        self.rec.settings.size = size
+        self._save()
 
     # ------------------------------------------------------------------ actions
 
-    def _send(self) -> None:
-        text = self.input.toPlainText().strip()
-        if not text:
+    def step(self, delta: int) -> None:
+        ns = [v.n for v in self.rec.versions]
+        if self.rec.current not in ns:
             return
-        self._run("new" if not self.rec.versions else "refine", text)
+        i = ns.index(self.rec.current) + delta
+        if 0 <= i < len(ns):
+            self._job("goto", version=ns[i], title="Bringing it back...")
 
-    def _run(self, action: str, text: str = "") -> None:
-        if self.queue.busy:
-            self._bubble("I'm still working on the last request; this one is queued.", False)
-        cur = self.rec.get_version(self.shown) if self.shown else None
-        if action == "refine" and cur is not None and cur.n != self.rec.current:  # refine the version on screen
-            self.rec.current = cur.n
-            (self.dir / "item.json").write_text(self.rec.model_dump_json(indent=1), encoding="utf-8")
+    def run(self, action: str, text: str = "") -> None:
         self._save_advanced()
+        self._job(action, text)
+
+    def _job(self, action: str, text: str = "", version: int | None = None, title: str = "") -> None:
         ref = f"{self.rec.asset_class}/{self.rec.name}"
-        cmd = C.asset_gen(self.project, ref, action, text, count=self.adv.count.value(),
-                          seed=self.adv.seed_value(), model=self.adv.model.currentData())
-        if text:
-            self._bubble(text, True)
-        self.input.clear()
-        self._busy(True, "Starting...")
+        cmd = C.asset_gen(self.project, ref, action, text, seed=self.adv.seed_value(), model=self.adv.model.currentData(),
+                          version=version)
         job = Job(f"{action} {self.rec.name}", [cmd], exit_ok=(0, 2))
-        job.done = lambda ok, job=job: self._finished(ok, job)
-        self.queue.submit(job)
+        job.done = lambda ok: self._finished(ok)
+        self.working = True
+        self.draw.set_busy(True)
+        run_on_stage(self.queue, job, self.draw.stage)
+        if title:
+            self.draw.stage.set_step(title)
 
     def _save_advanced(self) -> None:
         s = self.rec.settings
         s.style = self.adv.style.currentData()
         s.style_weight = self.adv.weight.value() if s.style else None
-        (self.dir / "item.json").write_text(self.rec.model_dump_json(indent=1), encoding="utf-8")
+        self._save()
 
-    def _finished(self, ok: bool, job: Job) -> None:
-        self._busy(False)
-        if not ok:
-            raw = "\n".join(job.output[-60:])
-            self._bubble(friendly_error(raw), False, error=True, details=raw)
-            return
+    def _finished(self, ok: bool) -> None:
+        self.working = False
         self.reload()
-        self.changed.emit()
-
-    def _busy(self, on: bool, text: str = "") -> None:
-        for w in (self.progress, self.progress_text):
-            w.setVisible(on)
-        self.progress_text.setText(text)
-        for b in (self.send, self.regen, self.vars):
-            b.setEnabled(not on)
-        if on:
-            self.queue.stage.connect(self.progress_text.setText)
-        else:
-            try:
-                self.queue.stage.disconnect(self.progress_text.setText)
-            except (RuntimeError, TypeError):
-                pass
+        self.draw.set_busy(False)
+        if ok:
+            self.changed.emit()
 
     def _export(self) -> None:
-        cmd = C.asset_export(self.project, f"{self.rec.asset_class}/{self.rec.name}", self.rec.settings.size,
-                             self.shown)
+        cmd = C.asset_export(self.project, f"{self.rec.asset_class}/{self.rec.name}", self.rec.settings.size)
         job = Job(f"export {self.rec.name}", [cmd])
 
         def done(ok: bool) -> None:
             if ok:
                 out = next((ln.split("exported ", 1)[1] for ln in job.output if ln.startswith("exported ")), "")
-                self._bubble(f"Exported to {out}", False)
-            else:
-                raw = "\n".join(job.output[-30:])
-                self._bubble(friendly_error(raw), False, error=True, details=raw)
+                from ggs.ui.errors import show_saved
+
+                show_saved(self, "Exported", Path(out) if out else None)
 
         job.done = done
-        self.queue.submit(job)
-
-
-class Placeholder(QWidget):
-    def __init__(self, text: str):
-        super().__init__()
-        lay = QVBoxLayout(self)
-        lab = QLabel(text)
-        lab.setObjectName("muted")
-        lab.setWordWrap(True)
-        lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(lab)
-
+        run_on_stage(self.queue, job, self.draw.stage)
 
 
 class CharacterWorkspace(ItemWorkspace):
-    """A character: the item workspace plus the body & pose editor on the left."""
+    """A character: the body & pose editor, "Use this design", and the Sliced version and Animate tabs."""
 
     def __init__(self, queue: JobQueue, project: Path, item_dir: Path, styles: list[str], models: list[str]):
         super().__init__(queue, project, item_dir, styles, models)
         from ggs.items import CharacterSettings
         from ggs.ui.character_editor import BodyPoseEditor
+        from ggs.ui.character_page import AnimateTab, SlicedTab
 
         self.editor = BodyPoseEditor(self.rec.settings.character or CharacterSettings(), self.project)
         self.editor.changed.connect(self._character_changed)
-        self.layout().insertWidget(0, self.editor)
+        self.left.addWidget(self.editor)
+        self.tab_group = QButtonGroup(self)
+        for i, label in enumerate(("Design", "Sliced version", "Animate")):
+            b = QPushButton(label)
+            b.setObjectName("tab")
+            b.setCheckable(True)
+            b.setChecked(i == 0)
+            self.tab_group.addButton(b, i)
+            self.tabs_box.addWidget(b)
+        self.tab_group.idClicked.connect(self.show_tab)
+        self.sliced = SlicedTab(self)
+        self.animate = AnimateTab(self)
+        self.pages.addWidget(self.sliced)
+        self.pages.addWidget(self.animate)
+        # "Use this design" and what opens after it
+        self.accept_btn = QPushButton("✓  Use this design")
+        self.accept_btn.setObjectName("notice")
+        self.accept_btn.setToolTip("Keep this drawing as the character. Then you can make its sliced version, "
+                                   "animate it and export it.")
+        self.accept_btn.clicked.connect(self._accept)
+        self.kept = QLabel("✓  This is your character's design")
+        self.kept.setStyleSheet("color: #3fb27f; font-weight: 600;")
+        self.go_sliced = QPushButton("Make sliced version")
+        self.go_sliced.clicked.connect(lambda: self.show_tab(1))
+        self.go_anim = QPushButton("Animate")
+        self.go_anim.setIcon(icon("animations"))
+        self.go_anim.clicked.connect(lambda: self.show_tab(2))
+        for w in (self.accept_btn, self.kept, self.go_sliced, self.go_anim):
+            self.draw.extra.addWidget(w)
+        self.draw.extra.addStretch(1)
+        self._ready = True
+        self.refresh_buttons()
+
+    def refresh_buttons(self) -> None:
+        super().refresh_buttons()
+        if not getattr(self, "_ready", False):
+            return
+        has = self.rec.get_version() is not None and bool(self.rec.get_version().file)
+        accepted = self.rec.accepted is not None
+        on_design = accepted and self.rec.current == self.rec.accepted
+        self.accept_btn.setVisible(has and not on_design)
+        self.accept_btn.setEnabled(not self.working)
+        self.accept_btn.setText("✓  Use this design instead" if accepted else "✓  Use this design")
+        self.kept.setVisible(on_design)
+        self.go_sliced.setVisible(accepted)
+        self.go_anim.setVisible(accepted)
+        for i in (1, 2):
+            b = self.tab_group.button(i)
+            b.setEnabled(accepted)
+            b.setToolTip("" if accepted else "Press 'Use this design' first")
+        self.export_btn.setToolTip("Export the character's design (one picture + skeleton.json)" if accepted
+                                   else "Export the drawing on screen")
+
+    def show_tab(self, i: int) -> None:
+        self.tab_group.button(i).setChecked(True)
+        self.pages.setCurrentIndex(i)
+        self.editor.setVisible(i == 0)
+        if i == 1:
+            self.sliced.refresh()
+        elif i == 2:
+            self.animate.refresh()
 
     def _character_changed(self, cs) -> None:
         self.rec.settings.character = cs
-        (self.dir / "item.json").write_text(self.rec.model_dump_json(indent=1), encoding="utf-8")
+        self._save()
         if self.rec.versions:
-            self.input.setPlaceholderText("Pose or body changed: press Regenerate to draw it in the new pose, "
-                                          "or type a change to refine the current drawing")
+            self.draw.caption.setText(self.draw.caption.text().split("\n")[0] +
+                                      "\nPose or body changed: press Regenerate or Draw new to draw it that way.")
+
+    def _accept(self) -> None:
+        job = Job(f"accept {self.rec.name}", [C.asset_accept(self.project, f"character/{self.rec.name}")])
+        job.done = lambda ok: ok and (self.reload(), self.changed.emit())
+        run_on_stage(self.queue, job, self.draw.stage)
+        self.draw.stage.set_step("Saving the design...")

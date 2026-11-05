@@ -1,4 +1,4 @@
-"""v2 project items: create, chat actions (new, refine, regenerate, variations), versions, export (stub, CPU)."""
+"""v2 project items: create, actions (new, refine, regenerate, variations, goto), history, export (stub, CPU)."""
 
 import json
 
@@ -35,7 +35,7 @@ def test_create_and_lookup(project):
         I.load(project, "Health potion")
 
 
-def test_chat_actions_make_versions(project):
+def test_actions_keep_history_not_images(project):
     I.create(project, "sprite", "Potion", "a red health potion")
     with pytest.raises(I.ItemError, match="nothing to refine"):
         gen(project, "Potion", action="refine", text="make it blue")
@@ -49,11 +49,24 @@ def test_chat_actions_make_versions(project):
     rec, new = gen(project, "Potion", action="refine", text="make it blue")
     v = new[0]
     assert v.seed == before.seed and v.parent == before.n and v.prompt == "make it blue"
-    d = project / "items" / "sprite" / "potion" / "versions"
-    names = {f.name for f in d.iterdir()}
-    assert {f"v{n:03d}.png" for n in range(1, 7)} <= names and "v006_raw.png" in names
+    item = project / "items" / "sprite" / "potion"
+    names = {f.name for f in (item / "versions").iterdir()}
+    assert "v006.png" in names and "v006_raw.png" in names  # only the drawing on screen stays in the project
+    assert not any(n.startswith(("v001", "v002", "v005")) for n in names)
     assert not any("QA_FAILED" in n or "_01" in n for n in names)
-    assert [t.role for t in rec.chat[-2:]] == ["user", "app"] and rec.chat[-2].text == "make it blue"
+    assert rec.design_text() == ["a red health potion", "make it blue"] and v.description == "a red health potion"
+    # going back: from the cache when it has the drawing ...
+    rec, _ = gen(project, "Potion", action="goto", version=2)
+    assert rec.current == 2 and (item / "versions" / "v002.png").exists()
+    assert not (item / "versions" / "v006.png").exists()
+    # ... and drawn again from its recipe when it does not (a change is redrawn on top of its parent)
+    import shutil
+
+    shutil.rmtree(I.cache_dir(item))
+    rec, _ = gen(project, "Potion", action="goto", version=6)
+    assert rec.current == 6 and (item / "versions" / "v006.png").exists()
+    with pytest.raises(I.ItemError, match="no drawing"):
+        gen(project, "Potion", action="goto", version=99)
 
 
 def test_export_sizes(project):

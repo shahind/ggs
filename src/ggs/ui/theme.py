@@ -9,6 +9,7 @@ TEXT = "#e8e9ee"
 MUTED = "#9a9db0"
 GOOD = "#3fb27f"
 BAD = "#e0646a"
+NOTICE = "#f0a040"
 
 QSS = f"""
 * {{ font-family: "Segoe UI", "Inter", sans-serif; font-size: 10pt; color: {TEXT}; }}
@@ -25,6 +26,12 @@ QPushButton:hover {{ border-color: {ACCENT}; }}
 QPushButton:disabled {{ color: {MUTED}; border-color: {CARD}; }}
 QPushButton#primary {{ background: {ACCENT}; border: none; color: #10121a; font-weight: 600; }}
 QPushButton#primary:disabled {{ background: {LINE}; color: {MUTED}; }}
+QPushButton#notice {{ background: {NOTICE}; border: none; color: #1b1c21; font-weight: 600; }}
+QPushButton#notice:hover {{ background: #ffb85c; }}
+QPushButton#tab {{ background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0;
+    padding: 6px 10px; color: {MUTED}; font-weight: 600; }}
+QPushButton#tab:checked {{ color: {TEXT}; border-bottom-color: {ACCENT}; }}
+QPushButton#tab:disabled {{ color: {LINE}; }}
 QPushButton#flat {{ background: transparent; border: none; color: {MUTED}; }}
 QPushButton#flat:hover {{ color: {TEXT}; }}
 QPushButton#tile {{ background: {CARD}; border: 2px solid {LINE}; border-radius: 12px; padding: 10px; }}

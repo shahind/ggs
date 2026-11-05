@@ -49,10 +49,17 @@ def test_character_item_with_stub(tmp_path):
     assert sk["view"] == "front" and {b["name"] for b in sk["bones"]} >= {"hand_l", "hand_r", "head"}
     w, h = sk["size"]
     assert all(0 <= x <= w and 0 <= y <= h for b in sk["bones"] for x, y in (b["start"], b["end"]))
+    assert v.character.view == "front" and v.model == "stub"  # the recipe can redraw it
     rec, new = I.generate(p, "Knight", action="refine", text="add a red cape", model="stub", enforce_vram=False)
     assert new[0].parent == 1 and new[0].seed == v.seed
+    rec, design = I.accept(p, "Knight")
+    assert rec.accepted == 2 and (design / "design.png").exists() and (design / "design_skeleton.json").exists()
+    assert json.loads((design / "design.json").read_text(encoding="utf-8"))["text"] == ["a knight", "add a red cape"]
+    I.generate(p, "Knight", action="regenerate", model="stub", enforce_vram=False)  # the design stays
     out = I.export_item(p, "Knight")
-    assert out.with_name(out.stem + "_skeleton.json").exists()
+    assert json.loads(out.with_suffix(".export.json").read_text(encoding="utf-8"))["version"] == 2
+    sk = json.loads(out.with_name(out.stem + "_skeleton.json").read_text(encoding="utf-8"))
+    assert sk["image"] == out.name and sk["size"] == list(__import__("PIL.Image").Image.open(out).size)
 
 
 def test_limbs_missed_spots_wrong_arms():
@@ -82,8 +89,10 @@ def test_editor_changes_pose_and_body(qapp, tmp_path):
     ed._dragged("forearm_l", 120.0)
     assert ed.cs.pose["forearm_l"] == 120.0 and ed.cs.pose["hand_l"] != pose_angles("front", "a_pose")["hand_l"]
     ed.sliders["head"].setValue(180)
-    assert ed.cs.body["head"] == 1.8
-    ed._render()
+    assert ed.cs.body["head"] == 1.8 and ed.body_head.save.isVisibleTo(ed)
+    ed.sliders["forearm"].setValue(150)
+    assert ed.body_shape().factor("forearm") == 1.5 and ed.body_shape().factor("upper_arm") == 1.0
+    ed._emit()
     assert got and got[-1].body["head"] == 1.8
     side = next(b for b in ed.views.buttons() if b.property("view") == "side")
     ed._view(side)
@@ -132,7 +141,7 @@ def test_editor_saves_and_offers_presets(qapp, tmp_path, library_home):
     ed._save_pose("Salute")
     assert len(ed.poses.buttons()) == n_poses + 1
     assert ed.poses.checkedButton().property("saved").name == "Salute"
-    ed.sliders["legs"].setValue(150)
+    ed.sliders["thigh"].setValue(150)
     ed._save_body("Long legs")
     assert len(ed.bodies.buttons()) == n_bodies + 1 and ed.cs.body["name"] == "Long legs"
     other = BodyPoseEditor(I.CharacterSettings(view="front"), tmp_path / "g")  # a second character sees them

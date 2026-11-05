@@ -16,6 +16,7 @@ Each milestone is done only when its acceptance check passes. Update this file a
 | M8 | Other recipes: background (+parallax layers), tile (seamless), UI kit (9-slice + states), VFX (sheets + particle textures) | Each recipe has preset, QA rules, and exporter tests | done for v1: background (+far layer, wrap), tile, ui_panel, ui_icon, vfx; matted parallax foreground layers and VFX flipbooks moved after v1 |
 | M9 | Desktop UI: projects, collections, style/asset-type/format dropdowns, preview | Create project, train style, generate a rigged animated character without the CLI | v1 built (PySide6, `ggs ui`): every page drives the CLI; checked offscreen and with screenshots, not yet clicked through end to end by the owner. Collections and packaging (installer) after v1 |
 | M10 | Text-to-motion (Kimodo) + motion library browser | Prompt -> BVH -> clip; license-auditor sign-off recorded in the registry | done (2026-11-04): `ggs motion make/library/catalog/add`, Animations page (project, Library, Describe, Export); starter set + CMU + 100STYLE catalogs bundled |
+| M11 | Characters v3 (owner review 2026-11-05): stick-figure pose references, design history without stored images, accepted designs, sliced versions from templates, cut-out and drawn-frame animation from the character page, multi-clip export | A drawn character keeps its own shapes in the chosen pose (klein and SDXL); it is sliced, animated with library clips and exported to Godot/Unity/Defold | done on lite (2026-11-05); see the M11 notes |
 | v2 | 3D model generation | out of scope for now | |
 
 ## M1 notes
@@ -153,6 +154,35 @@ Each milestone is done only when its acceptance check passes. Update this file a
   on load. Previews are drawn on demand. BONES-SEED was rejected (licence: no redistribution, revenue cap, 43 GB).
 - 100STYLE takes are long laps; the converter picks the straightest 4 s window, then cuts a loop.
 - Not yet: trimming a long CMU take to a range in the app, layering library motions, multi-clip export.
+
+## M11 notes (owner review of the app, 2026-11-05)
+- Pose reference: the drawing model is shown a grey stick figure (bones as lines, joints as dots, the head as a
+  line with a face tick, far limbs lighter), not the puppet: given the puppet, klein copied its round head, box
+  hands and even its shirt colour. SDXL gets an OpenPose skeleton through the TencentARC T2I-Adapter (316 MB,
+  Apache-2.0, in the sdxl pack); SDXL side views sometimes turn to the camera (Regenerate gives another take).
+  The pose QA (drawing on the guide, limbs covered) passes the new drawings unchanged.
+- Items keep a history of recipes (description, change, seed, pose and body, model, style), not images. Only the
+  drawing on screen stays in the project; earlier ones move to `~/.ggs/cache/drawings` (40 per item) and are
+  redrawn from their recipe when the cache no longer has them (`ggs asset gen --action goto --version N`).
+- Workspace: no chat, no variations. Picture with Previous/Next and Regenerate, one spell-checked prompt box
+  (pyspellchecker) with "Change it" (edit) and "Draw new" (start over from the words). Loading placeholder with
+  the step and a percentage from `ggs.pipeline.progress` (learns each stage's time per machine). Errors pop up.
+- Characters: "Use this design" (`ggs asset accept`) saves `design/`; then the Sliced version tab
+  (`rigs/slice_templates.yaml`: side, side detailed with refined parts and faces, front) draws the design in
+  the template's pose with the design as reference and cuts it (`ggs character slice`); a try that fails
+  validation but is close (IoU >= 0.75) is kept as a rough cut with a warning. Long skirts and coats still cut
+  badly (the clown test: rough). The Animate tab: cut-out (library list + live preview, tick several, export one
+  engine package or one file per clip: `ggs export clip1 clip2 ...`) or drawn frames (`ggs character frames`,
+  stick-figure pose sheet shown first, 2-16 frames; clown walk 8/8 frames passed).
+- `ggs export` with no clips exports the sliced parts alone (one-frame `pose` clip), the rig taken from
+  character.yaml. Front-view rig: validator test poses and joint widths fixed so front cuts validate.
+- Body shapes: upper arm, forearm, thigh and shin each have their own factor (sliders). Pose editor drags at
+  preview size from a cached puppet (was a full rebuild per mouse move) with hover/drag cursors; Save buttons
+  show only after a change.
+- Fixed: klein style training left 2.5 GB on the GPU (the save helper held the model); the Styles page is one
+  form (import, describe, train, install) and no longer lets training start without captions. The old
+  Animations > Export tab (old-style characters only) is gone: animating is on the character page.
+- Library lists show motion names only (no dataset or author names); CREDITS.txt in exports is unchanged.
 
 ## Open decisions for the owner
 - Hard rule 5 vs VFX: is brightness-as-alpha for additive particle textures acceptable? (It is how emissive

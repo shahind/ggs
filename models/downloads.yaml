@@ -35,7 +35,7 @@ packs:
     label: SDXL (optional second drawing model)
     why: Faster style training; a different look. (Its 8-step Lightning LoRA comes with the installer.)
     required: false
-    size_gb: 6.7
+    size_gb: 7.0
     ready_when: {pipelines: [sdxl]}
     parts:
       - repo: stabilityai/stable-diffusion-xl-base-1.0
@@ -46,6 +46,9 @@ packs:
                   unet/diffusion_pytorch_model.fp16.safetensors, vae/config.json]
       - repo: madebyollin/sdxl-vae-fp16-fix
         dir: sdxl-vae-fp16-fix
+        include: [config.json, diffusion_pytorch_model.safetensors]
+      - repo: TencentARC/t2i-adapter-openpose-sdxl-1.0   # 316 MB: draws characters in the chosen pose
+        dir: t2i-adapter-openpose-sdxl-1.0
         include: [config.json, diffusion_pytorch_model.safetensors]
   captioner:
     label: Image describer (Qwen3-VL 2B)

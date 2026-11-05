@@ -72,3 +72,7 @@ image -> 5 templates + sliced sheets + animation library + export -> 6 frame by 
   character workspace, VFX flipbooks, installer.
 - Known: chibi T-pose can grow extra hands at the sides (the limb check sees missing limbs, not extra ones);
   the classic Animate and Styles pages are still the old look inside the new shell.
+- 2026-11-05 owner review (docs/ROADMAP.md M11 notes): chat and variations removed; history of recipes instead
+  of stored versions; stick-figure pose references; "Use this design"; ways **b** (sliced version from 3
+  templates, cut-out animation, multi-clip export, parts-only export) and **c** (drawn frames) are now tabs of
+  the character page. Still open: VFX flipbooks, chibi extra hands, cutting long skirts/coats cleanly.

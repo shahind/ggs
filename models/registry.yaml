@@ -90,6 +90,17 @@ entries:
     notes: "Hub card says openrail++ (checked 2026-11-03). Distillation LoRA: 8 steps, CFG off, trailing Euler
       schedule. Loaded under the user's style LoRA for every SDXL generation when present."
 
+  - id: t2i-adapter-openpose-sdxl
+    kind: component
+    name: T2I-Adapter OpenPose SDXL 1.0 (TencentARC)
+    base: sdxl-base-1.0
+    license: Apache-2.0
+    commercial: "yes"
+    min_vram_gb: 0.2
+    source: https://huggingface.co/TencentARC/t2i-adapter-openpose-sdxl-1.0
+    notes: "Hub card says apache-2.0 (checked 2026-11-05). 79M-parameter adapter (316 MB fp32): SDXL draws a
+      character in the pose of an OpenPose skeleton rendered from the rig (klein follows a stick figure instead)."
+
   - id: lora-pixel-art-klein4b
     kind: lora
     name: Limbicnation pixel-art sprite LoRA

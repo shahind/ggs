@@ -1,11 +1,14 @@
 """Body & pose editor: view, pose and body tiles, proportion sliders, and a live figure whose limbs can be dragged.
 
-The figure is the pose guide the generator draws over, so what you see is the pose and proportions you get.
+The figure shows the pose and proportions the character is drawn in. Dragging redraws from a cached puppet at
+the preview's own size, so it keeps up with the mouse; the settings are emitted once the mouse is let go.
 """
 
 from __future__ import annotations
 
+import json
 import math
+from functools import lru_cache
 
 from PySide6.QtCore import QPointF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
@@ -16,6 +19,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QSlider,
     QVBoxLayout,
     QWidget,
@@ -24,26 +28,27 @@ from PySide6.QtWidgets import (
 from ggs.ui.icons import icon
 from ggs.ui.theme import ACCENT
 
-SLIDERS = [("head", "Head"), ("torso", "Body"), ("arms", "Arms"), ("legs", "Legs"), ("width", "Build")]
+# (BodyShape field, label); the four limb segments have their own sliders
+SLIDERS = [("head", "Head"), ("torso", "Body"), ("upper_arm", "Upper arm"), ("forearm", "Forearm"),
+           ("thigh", "Thigh"), ("shin", "Lower leg"), ("width", "Build")]
 DRAG_BONES = ("hand", "forearm", "upper_arm", "shin", "thigh", "foot", "head")
 PREVIEW = 320
+GRAB = 22  # px (on screen) around a joint end that picks it up
 
 
-def _section(title: str, on_save) -> QWidget:
-    w = QWidget()
-    row = QHBoxLayout(w)
-    row.setContentsMargins(0, 6, 0, 0)
-    lab = QLabel(title)
-    lab.setStyleSheet("font-weight: 600;")
-    save = QPushButton("Save\u2026")
-    save.setIcon(icon("save"))
-    save.setObjectName("flat")
-    save.setToolTip(f"Save the current {title.lower()} to reuse it")
-    save.clicked.connect(lambda: on_save())
-    row.addWidget(lab)
-    row.addStretch(1)
-    row.addWidget(save)
-    return w
+@lru_cache(maxsize=2)
+def _rig(view: str):
+    from ggs.rig.poses import rig_for
+
+    return rig_for(view)
+
+
+@lru_cache(maxsize=8)
+def _puppet(view: str, body_json: str):
+    from ggs.rig.body import BodyShape
+    from ggs.rig.make import guide_puppet
+
+    return guide_puppet(_rig(view), BodyShape(**json.loads(body_json)))
 
 
 def _small_tile(text: str) -> QPushButton:
@@ -55,17 +60,20 @@ def _small_tile(text: str) -> QPushButton:
 
 
 class FigureView(QLabel):
-    """The guide render; dragging near a limb's end turns that limb toward the mouse."""
+    """The pose render; dragging a limb's end turns that limb toward the mouse."""
 
     angle_changed = Signal(str, float)
+    released = Signal()
 
     def __init__(self):
         super().__init__()
         self.setFixedSize(PREVIEW, PREVIEW)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet("background: white; border-radius: 10px;")
+        self.setMouseTracking(True)
         self.guide = None
         self.drag: str | None = None
+        self.hover: str | None = None
 
     def show_guide(self, guide) -> None:
         self.guide = guide
@@ -74,49 +82,94 @@ class FigureView(QLabel):
         pm = QPixmap(PREVIEW, PREVIEW)
         pm.fill(QColor(255, 255, 255))
         p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         p.drawImage(pm.rect(), qimg)
-        p.setPen(QPen(QColor(ACCENT), 2))
-        p.setBrush(QColor(ACCENT))
         k = PREVIEW / img.width
         for name, (_, (ex, ey)) in guide.spec.joints.items():
-            if name.rsplit("_", 1)[0] in DRAG_BONES or name == "head":
-                p.drawEllipse(QPointF(ex * k, ey * k), 4, 4)
+            if self._draggable(name):
+                on = name in (self.drag, self.hover)
+                p.setPen(QPen(QColor("#ffffff"), 2))
+                p.setBrush(QColor(ACCENT if not on else "#f0a040"))
+                p.drawEllipse(QPointF(ex * k, ey * k), 6 if on else 4.5, 6 if on else 4.5)
         p.end()
         self.setPixmap(pm)
 
-    def _to_img(self, pos) -> tuple[float, float]:
+    @staticmethod
+    def _draggable(name: str) -> bool:
+        return name.rsplit("_", 1)[0] in DRAG_BONES or name == "head"
+
+    def _joint_at(self, pos) -> str | None:
+        if self.guide is None:
+            return None
         k = self.guide.image.width / PREVIEW
-        return pos.x() * k, pos.y() * k
+        x, y = pos.x() * k, pos.y() * k
+        best, dist = None, GRAB * k
+        for name, (_, (ex, ey)) in self.guide.spec.joints.items():
+            if self._draggable(name):
+                d = math.hypot(ex - x, ey - y)
+                if d < dist:
+                    best, dist = name, d
+        return best
 
     def mousePressEvent(self, e) -> None:
-        if self.guide is None:
-            return
-        x, y = self._to_img(e.position())
-        best, dist = None, 30 * self.guide.image.width / PREVIEW
-        for name, (_, (ex, ey)) in self.guide.spec.joints.items():
-            if name.rsplit("_", 1)[0] not in DRAG_BONES and name != "head":
-                continue
-            d = math.hypot(ex - x, ey - y)
-            if d < dist:
-                best, dist = name, d
-        self.drag = best
+        self.drag = self._joint_at(e.position())
+        if self.drag:
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
 
     def mouseMoveEvent(self, e) -> None:
-        if self.drag is None or self.guide is None:
+        if self.drag is None:
+            near = self._joint_at(e.position())
+            if near != self.hover:
+                self.hover = near
+                self.setCursor(Qt.CursorShape.OpenHandCursor if near else Qt.CursorShape.ArrowCursor)
+                if self.guide is not None:
+                    self.show_guide(self.guide)
             return
-        x, y = self._to_img(e.position())
+        k = self.guide.image.width / PREVIEW
+        x, y = e.position().x() * k, e.position().y() * k
         (sx, sy), _ = self.guide.spec.joints[self.drag]
         if math.hypot(x - sx, y - sy) < 3:
             return
         self.angle_changed.emit(self.drag, math.degrees(math.atan2(-(x - sx), y - sy)))
 
     def mouseReleaseEvent(self, e) -> None:
-        self.drag = None
+        if self.drag:
+            self.drag = None
+            self.setCursor(Qt.CursorShape.OpenHandCursor if self._joint_at(e.position()) else
+                           Qt.CursorShape.ArrowCursor)
+            self.released.emit()
+
+    def leaveEvent(self, e) -> None:
+        if self.hover and self.drag is None:
+            self.hover = None
+            if self.guide is not None:
+                self.show_guide(self.guide)
+
+
+class _Section(QWidget):
+    """A section title with a Save button that only shows when there is something new to save."""
+
+    def __init__(self, title: str, on_save):
+        super().__init__()
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 6, 0, 0)
+        lab = QLabel(title)
+        lab.setStyleSheet("font-weight: 600;")
+        self.save = QPushButton(f"Save this {title.lower()}")
+        self.save.setIcon(icon("save"))
+        self.save.setObjectName("notice")
+        self.save.setToolTip(f"You changed the {title.lower()}: save it to reuse it later")
+        self.save.clicked.connect(lambda: on_save())
+        self.save.setVisible(False)
+        row.addWidget(lab)
+        row.addStretch(1)
+        row.addWidget(self.save)
 
 
 class BodyPoseEditor(QFrame):
-    """Edits a CharacterSettings; ``changed`` fires (debounced) with the new settings."""
+    """Edits a CharacterSettings; ``changed`` fires with the new settings (after a drag ends, a tile is picked
+    or the sliders rest)."""
 
     changed = Signal(object)
 
@@ -125,17 +178,25 @@ class BodyPoseEditor(QFrame):
         from ggs.rig.body import PRESETS
 
         self.project = project
-
         self.setObjectName("panel")
-        self.setFixedWidth(PREVIEW + 24)
+        self.setFixedWidth(PREVIEW + 40)
         self.cs = settings.model_copy(deep=True)
         self.presets = PRESETS
-        lay = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        inner = QWidget()
+        scroll.setWidget(inner)
+        outer.addWidget(scroll)
+        lay = QVBoxLayout(inner)
         t = QLabel("Body & pose")
         t.setObjectName("h2")
         lay.addWidget(t)
         self.figure = FigureView()
         self.figure.angle_changed.connect(self._dragged)
+        self.figure.released.connect(self._emit)
         lay.addWidget(self.figure, 0, Qt.AlignmentFlag.AlignHCenter)
         hint = QLabel("Drag a hand, foot, elbow or knee to bend it.")
         hint.setObjectName("muted")
@@ -153,12 +214,14 @@ class BodyPoseEditor(QFrame):
             row.addWidget(b)
         self.views.buttonClicked.connect(self._view)
         lay.addLayout(row)
-        lay.addWidget(_section("Pose", self._save_pose))
+        self.pose_head = _Section("Pose", self._save_pose)
+        lay.addWidget(self.pose_head)
         self.pose_box = QGridLayout()
         self.poses = QButtonGroup(self)
         self.poses.buttonClicked.connect(self._pose)
         lay.addLayout(self.pose_box)
-        lay.addWidget(_section("Body", self._save_body))
+        self.body_head = _Section("Body", self._save_body)
+        lay.addWidget(self.body_head)
         self.body_box = QGridLayout()
         self.bodies = QButtonGroup(self)
         self.bodies.buttonClicked.connect(self._body)
@@ -167,19 +230,20 @@ class BodyPoseEditor(QFrame):
         for key, label in SLIDERS:
             r = QHBoxLayout()
             lab = QLabel(label)
-            lab.setFixedWidth(44)
+            lab.setFixedWidth(70)
             sl = QSlider(Qt.Orientation.Horizontal)
             sl.setRange(40, 220)
             sl.valueChanged.connect(self._slid)
+            sl.sliderReleased.connect(self._emit)
             r.addWidget(lab)
             r.addWidget(sl, 1)
             lay.addLayout(r)
             self.sliders[key] = sl
         lay.addStretch(1)
-        self.timer = QTimer(self)
-        self.timer.setSingleShot(True)
-        self.timer.setInterval(120)
-        self.timer.timeout.connect(self._render)
+        self.emit_timer = QTimer(self)  # sliders moved by keyboard / wheel: emit once they rest
+        self.emit_timer.setSingleShot(True)
+        self.emit_timer.setInterval(400)
+        self.emit_timer.timeout.connect(self._emit)
         self._fill_poses()
         self._fill_bodies()
         self._set_sliders()
@@ -197,7 +261,7 @@ class BodyPoseEditor(QFrame):
         b = self.body_shape()
         for key, sl in self.sliders.items():
             sl.blockSignals(True)
-            sl.setValue(round(getattr(b, key) * 100))
+            sl.setValue(round((b.factor(key) if key not in ("width",) else b.width) * 100))
             sl.blockSignals(False)
 
     def _clear(self, group: QButtonGroup, box: QGridLayout) -> None:
@@ -223,27 +287,33 @@ class BodyPoseEditor(QFrame):
 
         self._clear(self.poses, self.pose_box)
         current = self.cs.pose
+        any_checked = False
         for i, saved in enumerate(list_poses(self.cs.view, self.project)):
             b = self._saved_tile(saved, "pose")
             if saved.scope == "builtin":
                 b.setChecked(saved.data.get("id") == current)
             else:
                 b.setChecked(isinstance(current, dict) and current == saved.data["angles"])
+            any_checked |= b.isChecked()
             self.poses.addButton(b)
             self.pose_box.addWidget(b, i // 3, i % 3)
+        self.pose_head.save.setVisible(not any_checked)
 
     def _fill_bodies(self) -> None:
         from ggs.library import list_bodies
 
         self._clear(self.bodies, self.body_box)
+        any_checked = False
         for i, saved in enumerate(list_bodies(self.project)):
             b = self._saved_tile(saved, "body")
             if saved.scope == "builtin":
                 b.setChecked(not self.cs.body and saved.data["name"] == self.cs.body_preset)
             else:
                 b.setChecked(bool(self.cs.body) and self.cs.body.get("name") == saved.name)
+            any_checked |= b.isChecked()
             self.bodies.addButton(b)
             self.body_box.addWidget(b, i // 3, i % 3)
+        self.body_head.save.setVisible(not any_checked)
 
     def _ask_name(self, what: str):
         from PySide6.QtWidgets import QCheckBox, QDialog, QDialogButtonBox, QLineEdit
@@ -273,13 +343,13 @@ class BodyPoseEditor(QFrame):
         try:
             saved = save_pose(got[0], self.cs.view, pose_angles(self.cs.view, self.cs.pose), self.project, got[1])
         except ValueError as exc:
-            from PySide6.QtWidgets import QMessageBox
+            from ggs.ui.errors import show_message
 
-            QMessageBox.information(self, "GGS", str(exc))
+            show_message(self, str(exc))
             return
         self.cs.pose = dict(saved.data["angles"])
         self._fill_poses()
-        self._changed()
+        self._emit()
 
     def _save_body(self, name: str | None = None, scope: str | None = None) -> None:
         from ggs.library import save_body
@@ -290,13 +360,13 @@ class BodyPoseEditor(QFrame):
         try:
             saved = save_body(got[0], self.body_shape().model_dump(), self.project, got[1])
         except ValueError as exc:
-            from PySide6.QtWidgets import QMessageBox
+            from ggs.ui.errors import show_message
 
-            QMessageBox.information(self, "GGS", str(exc))
+            show_message(self, str(exc))
             return
         self.cs.body = dict(saved.data)
         self._fill_bodies()
-        self._changed()
+        self._emit()
 
     def _delete(self, kind: str, saved) -> None:
         from PySide6.QtWidgets import QMessageBox
@@ -318,12 +388,15 @@ class BodyPoseEditor(QFrame):
         self.cs.view = b.property("view")
         self.cs.pose = DEFAULT[self.cs.view]
         self._fill_poses()
-        self._changed()
+        self._render()
+        self._emit()
 
     def _pose(self, b) -> None:
         saved = b.property("saved")
         self.cs.pose = saved.data["id"] if saved.scope == "builtin" else dict(saved.data["angles"])
-        self._changed()
+        self.pose_head.save.setVisible(False)
+        self._render()
+        self._emit()
 
     def _body(self, b) -> None:
         saved = b.property("saved")
@@ -332,18 +405,28 @@ class BodyPoseEditor(QFrame):
         else:
             self.cs.body = dict(saved.data)
         self._set_sliders()
-        self._changed()
+        self.body_head.save.setVisible(False)
+        self._render()
+        self._emit()
+
+    @staticmethod
+    def _uncheck(group: QButtonGroup) -> None:
+        if group.checkedButton():
+            group.setExclusive(False)
+            group.checkedButton().setChecked(False)
+            group.setExclusive(True)
 
     def _slid(self) -> None:
         b = self.body_shape().model_dump()
-        b.update({k: sl.value() / 100 for k, sl in self.sliders.items()})
+        for k, sl in self.sliders.items():
+            b[k] = sl.value() / 100
         b["name"], b["words"] = "custom", ""
         self.cs.body = b
-        if self.bodies.checkedButton():
-            self.bodies.setExclusive(False)
-            self.bodies.checkedButton().setChecked(False)
-            self.bodies.setExclusive(True)
-        self._changed()
+        self._uncheck(self.bodies)
+        self.body_head.save.setVisible(True)
+        self._render()
+        if not any(sl.isSliderDown() for sl in self.sliders.values()):
+            self.emit_timer.start()
 
     def _dragged(self, bone: str, angle: float) -> None:
         from ggs.rig.poses import pose_angles
@@ -352,27 +435,27 @@ class BodyPoseEditor(QFrame):
         delta = angle - angles[bone]
         angles[bone] = angle
         # children follow the bone they hang from, so the limb bends as one piece below the joint
-        from ggs.rig.poses import rig_for
-
-        rig = rig_for(self.cs.view)
+        rig = _rig(self.cs.view)
         kids = [b.name for b in rig.bones if b.parent == bone]
         while kids:
             k = kids.pop()
             angles[k] = angles[k] + delta
             kids += [b.name for b in rig.bones if b.parent == k]
         self.cs.pose = angles
-        if self.poses.checkedButton():
-            self.poses.setExclusive(False)
-            self.poses.checkedButton().setChecked(False)
-            self.poses.setExclusive(True)
-        self._changed()
+        self._uncheck(self.poses)
+        self.pose_head.save.setVisible(True)
+        self._render()
 
-    def _changed(self) -> None:
-        self.timer.start()
+    def _emit(self) -> None:
+        self.emit_timer.stop()
+        self.changed.emit(self.cs.model_copy(deep=True))
 
     def _render(self) -> None:
-        from ggs.items import character_guide
+        from ggs.rig.master import render_guide
+        from ggs.rig.poses import pose_angles
 
-        _, guide, _ = character_guide(self.cs, size=PREVIEW * 2)
+        body = self.body_shape()
+        puppet, lengths = _puppet(self.cs.view, body.model_dump_json())
+        guide = render_guide(_rig(self.cs.view), puppet, lengths, size=PREVIEW,
+                             angles=pose_angles(self.cs.view, self.cs.pose))
         self.figure.show_guide(guide)
-        self.changed.emit(self.cs.model_copy(deep=True))

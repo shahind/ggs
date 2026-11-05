@@ -190,6 +190,7 @@ class Puppet:
         x0, y0 = max(0, box[0] - padding), max(0, box[1] - padding)
         x1, y1 = min(w, box[2] + padding), min(h, box[3] + padding)
         cropped = [im.crop((x0, y0, x1, y1)) for im in frames]
+        self.last_root = (origin[0] - x0, origin[1] - y0)  # where the root sits in the cropped frames
         # Pivot: x under the root, y at the lowest visible pixel of the whole clip (ground contact). The
         # cut-out legs hang from the hips pivot, so the mocap ground line is a few pixels off.
         return cropped, (round(origin[0] - x0), box[3] - y0)

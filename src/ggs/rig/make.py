@@ -12,48 +12,79 @@ from pathlib import Path
 
 from ggs.rig.spec import RigSpec
 
+# The model sees a stick figure, not the puppet: given the puppet it copied the puppet's shapes (a round head,
+# box hands, even the shirt colour). See ggs.rig.stick.
 MASTER_PROMPT = (
-    "{style}Redraw the figure in the image as {description}{body}. Keep exactly the same pose, body proportions, size "
-    "and position. Full body, side view facing right, flat 2D game character art with clean outlines, plain flat "
-    "pure white background, no shadow, no text"
+    "{style}Draw a new full-body character: {description}{body}. Give the character exactly the pose of the stick "
+    "figure in the image (same head, arm and leg positions and the same size and place in the picture). The stick "
+    "figure is only a pose reference: do not draw it, its lines or dots. Side view facing right, flat 2D game "
+    "character art with clean outlines, plain flat pure white background, no shadow, no text"
 )
 
-
-VIEW_WORDS = {"side": "side view facing right", "front": "front view facing the viewer, symmetrical stance"}
+VIEW_WORDS = {"side": "Side view facing right", "front": "Front view facing the viewer, symmetrical stance"}
 CHARACTER_PROMPT = (
-    "{style}Redraw the figure in the image as {description}{body}. Keep exactly the same pose, body proportions, "
-    "size and position. Full body, {view}, flat 2D game character art with clean outlines, plain flat pure white "
-    "background, no shadow, no text"
+    "{style}Draw a new full-body character: {description}{body}. Give the character exactly the pose of the stick "
+    "figure in the image (same head, arm and leg positions and the same size and place in the picture). The stick "
+    "figure is only a pose reference: do not draw it, its lines or dots. {view}, flat 2D game character art with "
+    "clean outlines, plain flat pure white background, no shadow, no text"
+)
+# models that cannot look at a reference image (SDXL) get the pose from an OpenPose skeleton and plain words
+CHARACTER_TEXT = (
+    "{style}{description}{body}, full body character, {view}, flat 2D game character art with clean outlines, "
+    "plain flat pure white background, no shadow, no text"
 )
 CHARACTER_EDIT = ("{instruction}. Keep everything else exactly the same: the same character, pose, proportions, "
                   "position and drawing style, plain flat pure white background.")
 
 
+def pose_reference(rig: RigSpec, guide, model_kind: str = "reference"):
+    """What the model is shown for the pose: a stick figure (klein) or an OpenPose skeleton (SDXL)."""
+    from ggs.rig.stick import openpose_image, stick_image
+
+    if model_kind == "stub":  # CPU tests: the stub hands its reference back, so give it the puppet to "draw"
+        return on_white(guide.image)
+    if model_kind == "openpose":
+        return openpose_image(guide.spec.joints, guide.image.size, rig.view)
+    return stick_image(rig, guide.spec.joints, guide.image.size, facing="front" if rig.view == "front" else "right")
+
+
 def draw_character(guide, description: str, *, view: str, body=None, seeds: list[int], model: str,
                    profile: str = "lite", lora=None, lora_scale: float = 1.0, style: str = "",
-                   edit_of=None, instruction: str = "", enforce_vram: bool = True) -> list[tuple]:
-    """Draw a character over a pose guide (or edit a previous drawing ``edit_of`` with ``instruction``).
+                   edit_of=None, instruction: str = "", enforce_vram: bool = True, rig: RigSpec | None = None
+                   ) -> list[tuple]:
+    """Draw a character in the guide's pose (or edit a previous drawing ``edit_of`` with ``instruction``).
     Returns [(rgba array on the guide canvas, raw RGB image, seed)] per seed."""
     from ggs.generate import build_backends, real_rgba
     from ggs.pipeline.vram import Stages
     from ggs.recipes import load_recipe
+    from ggs.rig.poses import rig_for
 
+    rig = rig or rig_for(view)
     recipe = load_recipe("sprite")
     gen, matter = build_backends(recipe, model, profile)
-    if not getattr(gen, "supports_reference", False):
-        raise ValueError(f"{model!r} cannot draw over a pose guide; characters need flux2-klein-4b")
     size = guide.image.size[0]
-    if edit_of is not None:
-        prompt = CHARACTER_EDIT.format(instruction=instruction.strip().rstrip("."))
-        ref = edit_of
-    else:
-        words = body.describe() if body is not None else ""
-        prompt = CHARACTER_PROMPT.format(style=style, description=description.strip(),
-                                         body=f", with {words}" if words else "", view=VIEW_WORDS[view])
-        ref = on_white(guide.image)
-    prompt = " ".join(prompt.split())
+    words = body.describe() if body is not None else ""
+    body_words = f", with {words}" if words else ""
     stages = Stages(profile=profile, enforce=enforce_vram)
-    images = gen.generate(prompt, seeds, size, size, stages, lora=lora, lora_scale=lora_scale, reference=[ref])
+    if getattr(gen, "supports_reference", False):
+        if edit_of is not None:
+            prompt = CHARACTER_EDIT.format(instruction=instruction.strip().rstrip("."))
+            ref = edit_of
+        else:
+            prompt = CHARACTER_PROMPT.format(style=style, description=description.strip(), body=body_words,
+                                             view=VIEW_WORDS[view])
+            ref = pose_reference(rig, guide, "stub" if model == "stub" else "reference")
+        images = gen.generate(" ".join(prompt.split()), seeds, size, size, stages, lora=lora, lora_scale=lora_scale,
+                              reference=[ref])
+    elif getattr(gen, "supports_pose", False):
+        # no image editing: a change is drawn again from the description plus the change, same seed and pose
+        desc = description.strip() + (f", {instruction.strip().rstrip('.')}" if edit_of is not None else "")
+        view_words = "side view, in profile, facing right" if view == "side" else VIEW_WORDS[view].lower()
+        prompt = CHARACTER_TEXT.format(style=style, description=desc, body=body_words, view=view_words)
+        images = gen.generate(" ".join(prompt.split()), seeds, size, size, stages, lora=lora, lora_scale=lora_scale,
+                              pose=pose_reference(rig, guide, "openpose"))
+    else:
+        raise ValueError(f"{model!r} cannot draw a character in a chosen pose")
     alphas = matter.alphas(images, stages)
     out = []
     for seed, img, alpha in zip(seeds, images, alphas):
@@ -124,7 +155,8 @@ def make_masters(rig: RigSpec, description: str, out_dir: str | Path, *, seeds: 
                                            body=f", with {words}" if words else "").split())
     stages = Stages(profile=profile, enforce=enforce_vram)
     images = gen.generate(prompt, seeds, size, size, stages, lora=lora,
-                          lora_scale=1.0 if style_weight is None else style_weight, reference=[on_white(guide.image)])
+                          lora_scale=1.0 if style_weight is None else style_weight,
+                          reference=[pose_reference(rig, guide)])
     alphas = matter.alphas(images, stages)
     out = Path(out_dir)
     paths = []

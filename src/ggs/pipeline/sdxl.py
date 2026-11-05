@@ -77,11 +77,26 @@ def scheduler(files: dict[str, Path], speed: bool):
 
 
 def _pipeline(files: dict[str, Path], speed: bool, **parts):
-    from diffusers import StableDiffusionXLPipeline
+    from diffusers import StableDiffusionXLAdapterPipeline, StableDiffusionXLPipeline
 
     kw = {k: None for k in ("vae", "text_encoder", "text_encoder_2", "tokenizer", "tokenizer_2", "unet")}
     kw.update(parts)
+    if kw.get("adapter", 0) is None:
+        del kw["adapter"]
+    if "adapter" in kw:
+        return StableDiffusionXLAdapterPipeline(scheduler=scheduler(files, speed), **kw)
     return StableDiffusionXLPipeline(scheduler=scheduler(files, speed), add_watermarker=False, **kw)
+
+
+def load_pose_adapter(files: dict[str, Path]):
+    """The OpenPose T2I-Adapter (models/pipelines.yaml ``extras.pose_adapter``), or a clear error."""
+    import torch
+    from diffusers import T2IAdapter
+
+    path = files.get("pose_adapter")
+    if path is None:
+        raise ValueError("SDXL pose adapter not found (t2i-adapter-openpose-sdxl-1.0): run `ggs models fetch sdxl`")
+    return T2IAdapter.from_pretrained(path, torch_dtype=torch.bfloat16)
 
 
 class SdxlGenerator:
@@ -122,17 +137,21 @@ class SdxlGenerator:
     def encode(self, prompt: str, stages: Stages) -> dict:
         return self.encode_many([prompt], stages)[0]
 
-    def render(self, jobs: list[tuple[str, int]], width: int, height: int, stages: Stages,
+    pose_scale = 0.9  # how strongly the pose adapter steers (1 = as trained)
+
+    def render(self, jobs: list[tuple], width: int, height: int, stages: Stages,
                lora: Path | None = None, lora_scale: float = 1.0) -> list:
-        """Images for (prompt, seed) pairs with one UNet load and one VAE load."""
+        """Images for (prompt, seed[, OpenPose image]) jobs with one UNet load and one VAE load."""
         import torch
 
-        embeds = self.encode_many([p for p, _ in jobs], stages)
+        embeds = self.encode_many([j[0] for j in jobs], stages)
         bf16 = torch.bfloat16
         latents = []
+        posed = any(len(j) > 2 and j[2] is not None for j in jobs)
         with stages.stage("denoise"):
             unet = load_unet(self.files)
-            pipe = _pipeline(self.files, bool(self.speed_lora), unet=unet)
+            adapter = load_pose_adapter(self.files) if posed else None
+            pipe = _pipeline(self.files, bool(self.speed_lora), unet=unet, adapter=adapter)
             names, weights = [], []
             if self.speed_lora:
                 pipe.load_lora_weights(str(self.speed_lora), adapter_name=SPEED_ADAPTER)
@@ -147,8 +166,13 @@ class SdxlGenerator:
             pipe.to("cuda")
             pipe.set_progress_bar_config(disable=True)
             with torch.no_grad():
-                for (_, seed), e in zip(jobs, embeds):
-                    out = pipe(prompt_embeds=e["prompt_embeds"].to("cuda", bf16),
+                for job, e in zip(jobs, embeds):
+                    seed = job[1]
+                    extra = {}
+                    if posed:
+                        extra = {"image": job[2].convert("RGB").resize((width, height)),
+                                 "adapter_conditioning_scale": self.pose_scale}
+                    out = pipe(prompt_embeds=e["prompt_embeds"].to("cuda", bf16), **extra,
                                pooled_prompt_embeds=e["pooled"].to("cuda", bf16),
                                negative_prompt_embeds=e["negative_embeds"].to("cuda", bf16),
                                negative_pooled_prompt_embeds=e["negative_pooled"].to("cuda", bf16),
@@ -156,7 +180,7 @@ class SdxlGenerator:
                                guidance_scale=self.guidance, output_type="latent",
                                generator=torch.Generator("cuda").manual_seed(seed))
                     latents.append(out.images.cpu())
-            del pipe, unet, out
+            del pipe, unet, adapter, out
         return self.decode(latents, stages)
 
     def decode(self, latents: list, stages: Stages) -> list:
@@ -175,9 +199,11 @@ class SdxlGenerator:
         return images
 
     supports_reference = False
+    supports_pose = True  # an OpenPose skeleton steers the drawing (T2I-Adapter)
 
     def generate(self, prompt: str, seeds: list[int], width: int, height: int, stages: Stages,
-                 lora: Path | None = None, lora_scale: float = 1.0, reference: list | None = None) -> list:
+                 lora: Path | None = None, lora_scale: float = 1.0, reference: list | None = None,
+                 pose=None) -> list:
         if reference:
             raise ValueError("SDXL here has no reference-image editing; use flux2-klein-4b for this")
-        return self.render([(prompt, s) for s in seeds], width, height, stages, lora, lora_scale)
+        return self.render([(prompt, s, pose) for s in seeds], width, height, stages, lora, lora_scale)

@@ -24,6 +24,8 @@ Status key: **used** = the code loads it today; **candidate** = on disk or plann
 | Krea 2 turbo | ComfyUI `krea2_turbo_fp8_scaled` | not checked | **verify** | candidate | alternative base model |
 | fal klein 4B sprite-sheet LoRA | fal/flux-2-klein-4b-spritesheet-lora | unknown | **verify** | candidate | multi-angle sheets |
 | svntax pixel 4-walk LoRA | svntax-dev/pixel_spritesheet_4walk_small_lora_v1 | unknown | **verify** | candidate | pixel walk sheets |
+| T2I-Adapter OpenPose SDXL 1.0 | TencentARC/t2i-adapter-openpose-sdxl-1.0 (in the `sdxl` pack, downloaded on demand) | Apache-2.0 (hub card, checked 2026-11-05) | yes | **used** | SDXL characters follow the chosen pose |
+| pyspellchecker | PyPI `pyspellchecker` (bundled with the app) | MIT | yes | **used**, **bundled** | typo marks in the prompt box |
 | Kimodo SOMA-RP v1.2 | nvidia/Kimodo-SOMA-RP-v1.2 (downloaded on demand) | NVIDIA Open Model License (LICENSE in the repo, read 2026-11-04: "Models are commercially usable", no claim on outputs) | yes | **used** | text to motion; starter motion set |
 | Kimodo code | github.com/nv-tlabs/kimodo (pure-Python package, bundled in the app) | Apache-2.0 | yes | **used**, **bundled** | Kimodo runtime |
 | Llama-3-8B-Instruct + LLM2Vec adapters | NousResearch/Meta-Llama-3-8B-Instruct (ungated copy of Meta's weights) + McGill-NLP LLM2Vec mntp / mntp-supervised (MIT) | Meta Llama 3 Community License | yes under 700M monthly users; GGS does not redistribute the weights (users download them); **verify** that using an unofficial mirror is acceptable | **used** | Kimodo's text encoder (embeddings only) |

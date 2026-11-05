@@ -734,6 +734,61 @@ def cmd_character_sprites(args: argparse.Namespace) -> int:
     return 0 if best.passed == len(best.checks) else 2
 
 
+def cmd_character_slice(args: argparse.Namespace) -> int:
+    from ggs.items import ItemError
+    from ggs.pipeline.models import MissingModelError
+    from ggs.pipeline.vram import VramBudgetError
+    from ggs.rig.cutter import CutError
+    from ggs.rig.slices import make_slices
+
+    profile = args.profile or profile_for(detect_vram_gb())
+    seeds = [args.seed + i for i in range(args.count)] if args.seed is not None else None
+    try:
+        res = make_slices(Path(args.project), args.item, args.template, seeds=seeds, profile=profile,
+                          enforce_vram=not args.no_vram_check)
+    except (ItemError, MissingModelError, VramBudgetError, CutError, ValueError, OSError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    except ImportError as exc:
+        print(f'ERROR: {exc}. Install the GPU stack: see README ("gpu" extra).', file=sys.stderr)
+        return 1
+    for t in res.tries:
+        state = "OK" if t["passed"] else "rejected: " + "; ".join(t["failures"][:2])
+        print(f"try seed {t['seed']}: {state}")
+    if res.character is None:
+        print("ERROR: no try could be cut into clean parts; try again (other seeds) or change the design",
+              file=sys.stderr)
+        return 2
+    if res.rough:
+        print(f"wrote a ROUGH sliced version {res.character}: no try passed validation, the closest one is kept "
+              "(pieces may show gaps when they move)")
+        return 2
+    print(f"wrote sliced version {res.character}")
+    return 0
+
+
+def cmd_character_frames(args: argparse.Namespace) -> int:
+    from ggs.items import ItemError
+    from ggs.pipeline.models import MissingModelError
+    from ggs.pipeline.vram import VramBudgetError
+    from ggs.rig.sprites import make_frames
+
+    profile = args.profile or profile_for(detect_vram_gb())
+    seeds = [args.seed + i for i in range(args.count)] if args.seed is not None else None
+    try:
+        out, results = make_frames(Path(args.project), args.item, args.clip, frames=args.frames, seeds=seeds,
+                                   profile=profile, enforce_vram=not args.no_vram_check, name=args.name)
+    except (ItemError, MissingModelError, VramBudgetError, ValueError, OSError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    except ImportError as exc:
+        print(f'ERROR: {exc}. Install the GPU stack: see README ("gpu" extra).', file=sys.stderr)
+        return 1
+    best = results[0]
+    print(f"wrote frames {out}: {best.passed}/{len(best.checks)} frames pass the checks")
+    return 0 if best.passed == len(best.checks) else 2
+
+
 def cmd_item_make(args: argparse.Namespace) -> int:
     from ggs.rig.equipment import load_item, make_item
 
@@ -821,7 +876,7 @@ def cmd_asset_gen(args: argparse.Namespace) -> int:
     try:
         rec, new = generate(Path(args.project), args.item, action=args.action, text=args.text or "",
                             count=args.count, seed=args.seed, profile=profile, model=args.model,
-                            enforce_vram=not args.no_vram_check)
+                            enforce_vram=not args.no_vram_check, version=args.version)
     except (ItemError, MissingModelError, VramBudgetError, ValueError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -832,7 +887,21 @@ def cmd_asset_gen(args: argparse.Namespace) -> int:
         state = "OK" if v.passed else "QA FAILED: " + friendly(v.failures)
         print(f"v{v.n:03d} (seed {v.seed}): {state}  {v.file}")
     print(f"current version: v{rec.current:03d}" if rec.current else "no usable version yet")
+    if args.action == "goto":
+        return 0
     return 0 if any(v.passed for v in new) else 2
+
+
+def cmd_asset_accept(args: argparse.Namespace) -> int:
+    from ggs.items import ItemError, accept
+
+    try:
+        rec, out = accept(Path(args.project), args.item)
+    except (ItemError, OSError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    print(f"design of {rec.name} saved: {out} (drawing v{rec.accepted:03d})")
+    return 0
 
 
 def cmd_asset_list(args: argparse.Namespace) -> int:
@@ -841,7 +910,8 @@ def cmd_asset_list(args: argparse.Namespace) -> int:
     rows = list_items(Path(args.project))
     for rec, d in rows:
         cur = f"v{rec.current:03d}" if rec.current else "-"
-        print(f"{rec.asset_class:12} {rec.name:28} {len(rec.versions):3} versions, current {cur}  ({d})")
+        kept = f", design v{rec.accepted:03d}" if rec.accepted else ""
+        print(f"{rec.asset_class:12} {rec.name:28} {len(rec.versions):3} drawings, current {cur}{kept}  ({d})")
     if not rows:
         print("no items yet")
     return 0
@@ -1021,28 +1091,44 @@ def cmd_export(args: argparse.Namespace) -> int:
     from ggs.export.pack import PackError
     from ggs.export.rig_package import write_rig_package
     from ggs.export.sheet import save_sprite_sheet
+    from ggs.paths import rigs_dir
     from ggs.rig.character import load_character
     from ggs.rig.clip import load_clip
     from ggs.rig.puppet import RenderError
 
+    engine = args.format in ("rig", "godot", "unity", "defold")
+    lines = []
     try:
-        spec = load_rig_spec(args.rig)
-        clip = load_clip(args.clip)
         character = load_character(args.character)
-        if clip.rig != spec.id:
-            raise ValueError(f"clip is for rig {clip.rig!r}, not {spec.id!r}")
+        spec = load_rig_spec(args.rig or rigs_dir() / f"{character.spec.rig}.yaml")
         from ggs.rig.equipment import apply_two_hand, load_item
 
         items = [load_item(i) for i in args.item]
-        for it in items:  # two-hand items: the far arm reaches the second grip (IK, every frame)
-            if it.spec.hold == "two_hand":
-                clip = apply_two_hand(clip, spec, character.spec.bone_lengths, it.spec)
-        name = args.name or Path(args.clip).stem
+        clips = {}
+        for path in args.clip:
+            clip = load_clip(path)
+            if clip.rig != spec.id:
+                raise ValueError(f"{Path(path).name} is for rig {clip.rig!r}; this character uses {spec.id!r}")
+            for it in items:  # two-hand items: the far arm reaches the second grip (IK, every frame)
+                if it.spec.hold == "two_hand":
+                    clip = apply_two_hand(clip, spec, character.spec.bone_lengths, it.spec)
+            name = args.name if (args.name and len(args.clip) == 1) else Path(path).stem
+            while name in clips:
+                name += "_2"
+            clips[name] = clip
+        if not clips:  # the character on its own: one still frame in its rest pose
+            if not engine:
+                raise ExportError("give at least one animation for apng/webp/gif/sheet (or export the parts with "
+                                  "--format rig, godot, unity or defold)")
+            from ggs.rig.master import pose_clip
+            from ggs.rig.poses import DEFAULT, pose_angles
+
+            view = "front" if spec.view == "front" else "side"
+            clips["pose"] = pose_clip(spec, pose_angles(view, DEFAULT[view]), character.spec.bone_lengths, "pose")
         height = max(8, round(args.height * character.spec.stature))  # taller characters render taller
-        if args.format in ("rig", "godot", "unity", "defold"):
-            out = write_rig_package(spec, character, {name: clip}, args.out, height,
-                                    padding=args.padding, items=items)
-            print(f"wrote rig package {out}")
+        if engine:
+            out = write_rig_package(spec, character, clips, args.out, height, padding=args.padding, items=items)
+            print(f"wrote rig package {out} ({len(clips)} animation{'s' if len(clips) > 1 else ''})")
             if args.format == "godot":
                 from ggs.export.engines.godot import write_godot
 
@@ -1061,33 +1147,42 @@ def cmd_export(args: argparse.Namespace) -> int:
             return 0
         if args.format == "gif" and not args.matte:
             raise ExportError("GIF has 1-bit alpha; pass --matte #RRGGBB (your game's background colour)")
-        frames, anchor = character.puppet(spec, items).render_clip(clip, height, padding=args.padding)
-        if args.format == "apng":
-            out = save_apng(frames, args.out, clip.fps, clip.loop)
-        elif args.format == "webp":
-            out = save_webp(frames, args.out, clip.fps, clip.loop)
-        elif args.format == "gif":
-            out = save_gif(frames, args.out, clip.fps, parse_color(args.matte), clip.loop)
-        else:
-            out, atlas = save_sprite_sheet(frames, anchor, args.out, name, clip.fps, clip.loop,
-                                           padding=args.padding)
-            print(f"wrote {atlas}")
+        many = len(clips) > 1
+        ext = {"apng": ".png", "webp": ".webp", "gif": ".gif", "sheet": ".png"}[args.format]
+        for name, clip in clips.items():
+            target = Path(args.out) / f"{name}{ext}" if many else Path(args.out)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            frames, anchor = character.puppet(spec, items).render_clip(clip, height, padding=args.padding)
+            if args.format == "apng":
+                out = save_apng(frames, target, clip.fps, clip.loop)
+            elif args.format == "webp":
+                out = save_webp(frames, target, clip.fps, clip.loop)
+            elif args.format == "gif":
+                out = save_gif(frames, target, clip.fps, parse_color(args.matte), clip.loop)
+            else:
+                out, atlas = save_sprite_sheet(frames, anchor, target, name, clip.fps, clip.loop,
+                                               padding=args.padding)
+                lines.append(f"wrote {atlas}")
+            w, h = frames[0].size
+            lines.append(f"wrote {out}: {clip.frame_count} frames of {w}x{h} px, pivot {anchor}")
     except (ExportError, PackError, RenderError, ValueError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     except ImportError:
         print('ERROR: needs Pillow: pip install -e ".[image]"', file=sys.stderr)
         return 1
-    w, h = frames[0].size
-    print(f"wrote {out}: {clip.frame_count} frames of {w}x{h} px, pivot {anchor}")
-    _export_credits(args.clip, Path(out).with_name(Path(out).stem + "_CREDITS.txt"))
+    for ln in lines:
+        print(ln)
+    dest = Path(args.out) / "CREDITS.txt" if len(clips) > 1 else Path(args.out).with_name(
+        Path(args.out).stem + "_CREDITS.txt")
+    _export_credits(args.clip, dest)
     return 0
 
 
-def _export_credits(clip: str, dest: Path) -> None:
+def _export_credits(clips, dest: Path) -> None:
     from ggs.rig.library import write_credits
 
-    p = write_credits([Path(clip)], dest)
+    p = write_credits([Path(c) for c in ([clips] if isinstance(clips, (str, Path)) else clips)], dest)
     if p:
         print(f"wrote {p}: credit lines for the motion libraries used")
 
@@ -1155,10 +1250,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="export size: small 128, medium 256, large 512 px (longest side), full")
     an.add_argument("--style", default=None)
     an.set_defaults(func=cmd_asset_new)
-    ag = ast.add_parser("gen", help="run a chat action on an item: new, refine, regenerate, variations")
+    ag = ast.add_parser("gen", help="draw an item: new, refine, regenerate, variations, or goto (an earlier one)")
     ag.add_argument("item", help="item name, or <class>/<name>")
     ag.add_argument("--project", required=True)
-    ag.add_argument("--action", default="new", choices=["new", "refine", "regenerate", "variations"])
+    ag.add_argument("--action", default="new", choices=["new", "refine", "regenerate", "variations", "goto"])
+    ag.add_argument("--version", type=int, default=None, help="goto: the history entry to show again")
     ag.add_argument("--text", default="", help="new: the description; refine: what to change")
     ag.add_argument("--count", type=int, default=3, help="variations: how many")
     ag.add_argument("--seed", type=int, default=None, help="advanced: fix the seed")
@@ -1166,6 +1262,10 @@ def build_parser() -> argparse.ArgumentParser:
     ag.add_argument("--profile", choices=["standard", "lite"], default=None)
     ag.add_argument("--no-vram-check", action="store_true")
     ag.set_defaults(func=cmd_asset_gen)
+    aa = ast.add_parser("accept", help="keep the drawing on screen as the item's design (characters)")
+    aa.add_argument("item")
+    aa.add_argument("--project", required=True)
+    aa.set_defaults(func=cmd_asset_accept)
     al = ast.add_parser("list", help="the project's items")
     al.add_argument("--project", required=True)
     al.set_defaults(func=cmd_asset_list)
@@ -1360,6 +1460,28 @@ def build_parser() -> argparse.ArgumentParser:
     csp.add_argument("--profile", choices=["standard", "lite"], default=None)
     csp.add_argument("--no-vram-check", action="store_true")
     csp.set_defaults(func=cmd_character_sprites)
+    csl = char.add_parser("slice", help="a character item's sliced version: its design drawn in a template's "
+                                       "pose and cut into parts (exit 2 if no try cuts cleanly)")
+    csl.add_argument("item", help="character item name in the project")
+    csl.add_argument("--project", required=True)
+    csl.add_argument("--template", default="side_simple", help="see rigs/slice_templates.yaml")
+    csl.add_argument("--seed", type=int, default=None, help="first seed (default: the design's)")
+    csl.add_argument("--count", type=int, default=3, help="tries; the first that cuts cleanly is kept")
+    csl.add_argument("--profile", choices=["standard", "lite"], default=None)
+    csl.add_argument("--no-vram-check", action="store_true")
+    csl.set_defaults(func=cmd_character_slice)
+    cfr = char.add_parser("frames", help="draw a character item's design in every pose of an animation "
+                                        "(exit 2 if a frame fails its check)")
+    cfr.add_argument("item", help="character item name in the project")
+    cfr.add_argument("--project", required=True)
+    cfr.add_argument("--clip", required=True, help="clip JSON (the project's animations folder)")
+    cfr.add_argument("--frames", type=int, default=8, help="2-16 frames, all drawn in one image")
+    cfr.add_argument("--name", default=None, help="folder name under <item>/frames (default: the clip's)")
+    cfr.add_argument("--seed", type=int, default=None, help="first seed (default: the design's)")
+    cfr.add_argument("--count", type=int, default=1, help="sheets to try; the best is kept")
+    cfr.add_argument("--profile", choices=["standard", "lite"], default=None)
+    cfr.add_argument("--no-vram-check", action="store_true")
+    cfr.set_defaults(func=cmd_character_frames)
     cc = char.add_parser("cut", help="cut a master.json into a part sheet and validate it (exit 2 if rejected)")
     cc.add_argument("master", help="master.json written by `ggs character master`")
     cc.add_argument("--out", required=True, help="character folder to write")
@@ -1444,22 +1566,23 @@ def build_parser() -> argparse.ArgumentParser:
     im.add_argument("--hold-angle", type=float, default=-90.0, help="item direction relative to the hand")
     im.set_defaults(func=cmd_item_make)
 
-    ex = sub.add_parser("export", help="render a clip with a character and export it")
-    ex.add_argument("clip")
+    ex = sub.add_parser("export", help="export a cut-out character with its animations (or on its own)")
+    ex.add_argument("clip", nargs="*", help="clip JSON files; none = the character's parts in its rest pose "
+                                           "(rig/godot/unity/defold only)")
     ex.add_argument("--character", required=True, help="character.yaml")
     ex.add_argument("--format", required=True,
                     choices=["apng", "webp", "gif", "sheet", "rig", "godot", "unity", "defold"])
     ex.add_argument("--out", required=True,
-                    help="file (.png/.webp/.gif) or folder for --format rig/godot/unity/defold")
+                    help="file (.png/.webp/.gif), or a folder for rig/godot/unity/defold and for several clips")
     ex.add_argument("--defold-path", default=None,
                     help="Defold only: where the folder sits in the project (default /ggs/<name>)")
-    ex.add_argument("--rig", default=str(DEFAULT_RIG))
+    ex.add_argument("--rig", default=None, help="rig YAML (default: the one the character was made for)")
     ex.add_argument("--item", action="append", default=[], help="held item folder or item.yaml (repeatable)")
     ex.add_argument("--height", type=int, default=256,
                     help="standing height in pixels of a stature-1.0 character (character.yaml stature scales it)")
     ex.add_argument("--padding", type=int, default=2)
     ex.add_argument("--matte", default=None, help="GIF only: background colour #RRGGBB for soft edges")
-    ex.add_argument("--name", default=None, help="animation name (default: clip file name)")
+    ex.add_argument("--name", default=None, help="animation name for a single clip (default: its file name)")
     ex.set_defaults(func=cmd_export)
     return p
 

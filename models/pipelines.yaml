@@ -34,6 +34,7 @@ pipelines:
       - stable-diffusion-xl-base-1.0/vae
     extras:
       speed_lora: [SDXL-Lightning/sdxl_lightning_8step_lora.safetensors]   # 8 steps, no CFG
+      pose_adapter: [t2i-adapter-openpose-sdxl-1.0]   # T2I-Adapter: characters follow an OpenPose skeleton
     # without the speed LoRA: `steps` with CFG `guidance`; with it: `speed_steps`, CFG off
     defaults: {steps: 30, guidance: 6.0, speed_steps: 8,
                negative: "blurry, lowres, jpeg artifacts, watermark, text, signature, cropped, frame"}

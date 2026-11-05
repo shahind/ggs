@@ -87,7 +87,11 @@ def test_project_window_tree_and_workspace(qapp, tmp_path, settings):
     v.tree.setCurrentItem(it)
     ws = v.stack.currentWidget()
     assert isinstance(ws, ItemWorkspace)
-    assert ws.send.text() == "Refine" and ws.regen.isEnabled() and ws.versions.count() == 1
+    d = ws.draw
+    assert d.change.isVisibleTo(ws) and d.new.text() == "Draw new" and d.regen.isEnabled()
+    assert d.where.text() == "1 of 1" and not d.prev.isEnabled() and d.stage.pix is not None
+    assert d.input.toPlainText() == "a red potion"  # the prompt stays in the box (typos stay visible)
+    assert not hasattr(ws, "chat_lay") and not hasattr(d, "vars")  # no chat, no variations
     assert not ws.adv.isVisible()  # Advanced is closed by default
     v.model.setCurrentIndex(v.model.findData("flux2-klein-4b"))
     assert "flux2-klein-4b" in (tmp_path / "g" / ".ggs" / "project.yaml").read_text(encoding="utf-8")
@@ -131,3 +135,59 @@ def test_job_queue_runs_cli_and_reports_stages(qapp, tmp_path):
     assert results == [True] and "Drawing..." in stages
     rec = json.loads((tmp_path / "p" / "items" / "sprite" / "gem" / "item.json").read_text(encoding="utf-8"))
     assert rec["current"] == 1
+
+
+def test_character_workspace_tabs_open_after_accept(qapp, tmp_path, settings):
+    from ggs import items as I
+    from ggs.style.package import init_project
+    from ggs.ui.app import MainWindow
+
+    init_project(tmp_path / "g", "Game")
+    p = tmp_path / "g"
+    I.create(p, "character", "Hero", "a hero")
+    I.generate(p, "Hero", action="new", model="stub", enforce_vram=False)
+    w = MainWindow(p, settings=settings)
+    w.view._open_item(p / "items" / "character" / "hero")
+    ws = w.view.cache[str(p / "items" / "character" / "hero")]
+    assert ws.accept_btn.isVisibleTo(ws) and not ws.tab_group.button(1).isEnabled()
+    I.accept(p, "Hero")
+    ws.reload()
+    assert ws.kept.isVisibleTo(ws) and not ws.accept_btn.isVisibleTo(ws) and ws.tab_group.button(2).isEnabled()
+    ws.show_tab(1)
+    assert len(ws.sliced.group.buttons()) >= 3 and not ws.sliced.export.isEnabled()  # nothing sliced yet
+    ws.show_tab(2)
+    assert ws.animate.cutout.need.isVisibleTo(ws)  # cut-out needs the sliced version first
+    ws.animate.methods.button(1).click()
+    ws.animate.drawn.list.list.setCurrentRow(1)  # first library animation: its poses are shown
+    assert ws.animate.drawn.poses.pixmap() is not None
+    w.close()
+
+
+def test_spelling_marks_typos():
+    pytest.importorskip("spellchecker")
+    from ggs.ui.spell import suggestions, unknown_words
+
+    assert unknown_words("a little clawn boy with exagarated eyes") == {"clawn", "exagarated"}
+    assert unknown_words("a chibi knight sprite, GGSINK style") == set()
+    assert suggestions("clawn")[0] == "clown"
+
+
+def test_progress_estimates_from_stage_times(tmp_path, monkeypatch):
+    import time
+
+    from ggs.pipeline import progress as P
+
+    monkeypatch.setattr(P, "_times_file", lambda: tmp_path / "times.json")
+    (tmp_path / "times.json").write_text(json.dumps({"k:encode": 1.0, "k:denoise": 0.5}), encoding="utf-8")
+    t = P._Ticker("k", ["encode", "denoise"])
+    t.stop.set()
+    t.enter("encode")
+    t.leave("encode")
+    t.enter("denoise")
+    time.sleep(0.2)
+    first = t.percent()
+    time.sleep(0.1)
+    assert 10 < first <= t.percent() < 99
+    t.finish()
+    saved = json.loads((tmp_path / "times.json").read_text(encoding="utf-8"))
+    assert saved["k:denoise"] != 0.5 and "*:encode" in saved  # learnt from this run

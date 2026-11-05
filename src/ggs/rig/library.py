@@ -83,6 +83,19 @@ def sidecar(clip_path: Path) -> Path:
     return Path(clip_path).with_suffix(".motion.json")
 
 
+def clip_label(clip_path: Path) -> str:
+    """The name to show for a clip: its sidecar's name, else the file name in words."""
+    side = sidecar(Path(clip_path))
+    if side.is_file():
+        try:
+            name = json.loads(side.read_text(encoding="utf-8")).get("name")
+            if name:
+                return str(name)
+        except (OSError, ValueError):
+            pass
+    return Path(clip_path).stem.replace("_", " ").strip().capitalize()
+
+
 def to_clip(bvh: Path, rig, *, loop: bool = False, in_place: bool = False,
             loop_seconds: tuple[float, float] = (0.6, 1.6), fps: float = CLIP_FPS) -> Clip:
     """Retarget a Kimodo BVH (rig profile ``soma``) and optionally cut a seamless loop out of it."""

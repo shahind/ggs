@@ -22,14 +22,38 @@ class BodyShape(BaseModel):
     arms: float = Field(1.0, gt=0.3, le=2.0)
     legs: float = Field(1.0, gt=0.3, le=2.0)
     width: float = Field(1.0, gt=0.3, le=2.5)  # thickness of every part
+    # one segment on its own (None = the arms / legs factor above), so a long forearm on a short upper arm works
+    upper_arm: float | None = Field(None, gt=0.3, le=2.0)
+    forearm: float | None = Field(None, gt=0.3, le=2.0)
+    thigh: float | None = Field(None, gt=0.3, le=2.0)
+    shin: float | None = Field(None, gt=0.3, le=2.0)
     words: str = ""  # added to the master prompt
+
+    def factor(self, segment: str) -> float:
+        """Length factor of a body segment: head, torso, upper_arm, forearm, hand, thigh or shin."""
+        if segment in ("head", "torso"):
+            return getattr(self, segment)
+        if segment in ("upper_arm", "forearm", "thigh", "shin"):
+            own = getattr(self, segment)
+            if own is not None:
+                return own
+        return self.arms if segment in ("upper_arm", "forearm", "hand") else self.legs
+
+    @property
+    def arm_mean(self) -> float:
+        return (self.factor("upper_arm") + self.factor("forearm")) / 2
+
+    @property
+    def leg_mean(self) -> float:
+        return (self.factor("thigh") + self.factor("shin")) / 2
 
     def describe(self) -> str:
         if self.words:
             return self.words
         out = []
-        for value, big, small in ((self.head, "a large head", "a small head"), (self.legs, "long legs", "short legs"),
-                                  (self.arms, "long arms", "short arms"), (self.width, "a stocky, broad build",
+        for value, big, small in ((self.head, "a large head", "a small head"),
+                                  (self.leg_mean, "long legs", "short legs"),
+                                  (self.arm_mean, "long arms", "short arms"), (self.width, "a stocky, broad build",
                                                                            "a slim build")):
             if value >= 1.15:
                 out.append(big)
@@ -52,8 +76,8 @@ PRESETS: dict[str, BodyShape] = {
                        words="child proportions: a large head and short limbs"),
 }
 
-_GROUPS = {"head": ("head",), "torso": ("torso",), "arms": ("upper_arm", "forearm", "hand"),
-           "legs": ("thigh", "shin")}
+_SEGMENTS = ("head", "torso", "upper_arm", "forearm", "hand", "thigh", "shin")
+RATIOS = ("head", "torso", "arms", "legs", "width", "upper_arm", "forearm", "thigh", "shin")
 
 
 def parse_body(text: str | None) -> BodyShape:
@@ -69,8 +93,8 @@ def parse_body(text: str | None) -> BodyShape:
     for item in t.split(","):
         key, _, val = item.partition("=")
         key = key.strip()
-        if key not in ("head", "torso", "arms", "legs", "width"):
-            raise ValueError(f"body ratio {key!r} unknown; use head, torso, arms, legs, width")
+        if key not in RATIOS:
+            raise ValueError(f"body ratio {key!r} unknown; use {', '.join(RATIOS)}")
         try:
             values[key] = float(val)
         except ValueError as exc:
@@ -85,12 +109,9 @@ def _base(bone: str) -> str:
     return bone
 
 
-def _group(bone: str) -> str | None:
+def _segment(bone: str) -> str | None:
     base = _base(bone)
-    for g, names in _GROUPS.items():
-        if base in names:
-            return g
-    return None
+    return base if base in _SEGMENTS else None
 
 
 def standing_height(lengths: dict[str, float], head_scale: float = 1.0) -> float:
@@ -106,10 +127,10 @@ def body_lengths(rig: RigSpec, body: BodyShape) -> dict[str, float]:
     rest = {b.name: b.rest_length for b in rig.bones}
     out = {}
     for name, length in rest.items():
-        g = _group(name)
-        out[name] = length * (getattr(body, g) if g else 1.0)
+        g = _segment(name)
+        out[name] = length * (body.factor(g) if g else 1.0)
         if _base(name) == "foot":
-            out[name] = length * (1.0 + body.legs) / 2  # feet follow the legs halfway
+            out[name] = length * (1.0 + body.leg_mean) / 2  # feet follow the legs halfway
     k = standing_height(rest) / standing_height(out, body.head)
     return {n: round(v * k, 5) for n, v in out.items()}
 
@@ -117,8 +138,8 @@ def body_lengths(rig: RigSpec, body: BodyShape) -> dict[str, float]:
 def body_scale(rig: RigSpec, body: BodyShape) -> float:
     """Factor the lengths were rescaled by (widths and the skull scale with it, so the drawing stays in step)."""
     rest = {b.name: b.rest_length for b in rig.bones}
-    raw = {n: rest[n] * (getattr(body, g) if (g := _group(n)) else 1.0) for n in rest}
+    raw = {n: rest[n] * (body.factor(g) if (g := _segment(n)) else 1.0) for n in rest}
     for n in raw:
         if _base(n) == "foot":
-            raw[n] = rest[n] * (1.0 + body.legs) / 2
+            raw[n] = rest[n] * (1.0 + body.leg_mean) / 2
     return standing_height(rest) / standing_height(raw, body.head)

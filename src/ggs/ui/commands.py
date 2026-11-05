@@ -182,11 +182,35 @@ def asset_new(project: Path, asset_class: str, name: str, describe: str = "", si
 
 
 def asset_gen(project: Path, item: str, action: str, text: str = "", *, count: int = 3, seed: int | None = None,
-              model: str | None = None) -> list[str]:
+              model: str | None = None, version: int | None = None) -> list[str]:
     a = [*GGS, "asset", "gen", item, "--project", str(project), "--action", action, "--count", str(count)]
     _opt(a, "--text", text)
     _opt(a, "--seed", seed)
     _opt(a, "--model", model)
+    _opt(a, "--version", version)
+    return a
+
+
+def asset_accept(project: Path, item: str) -> list[str]:
+    return [*GGS, "asset", "accept", item, "--project", str(project)]
+
+
+def character_slice(project: Path, item: str, template: str) -> list[str]:
+    return [*GGS, "character", "slice", item, "--project", str(project), "--template", template]
+
+
+def character_frames(project: Path, item: str, clip: Path, frames: int, name: str | None = None) -> list[str]:
+    a = [*GGS, "character", "frames", item, "--project", str(project), "--clip", str(clip), "--frames", str(frames)]
+    _opt(a, "--name", name)
+    return a
+
+
+def export_many(clips: list[Path], character: Path, fmt: str, out: Path, *, height: int = 256,
+                matte: str | None = None) -> list[str]:
+    """``ggs export`` with several clips (one engine package, or one file per clip in a folder) or none."""
+    a = [*GGS, "export", *[str(c) for c in clips], "--character", str(character), "--format", fmt, "--out", str(out),
+         "--height", str(height)]
+    _opt(a, "--matte", matte)
     return a
 
 

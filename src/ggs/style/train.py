@@ -181,7 +181,10 @@ def train_lora(images: list, captions: list[str], files: dict[str, Path], settin
                 previews.append(pipe(prompt_embeds=e.to("cuda", bf16), height=settings.resolution,
                                      width=settings.resolution, num_inference_steps=4, guidance_scale=1.0,
                                      generator=torch.Generator("cuda").manual_seed(settings.seed + k)).images[0])
-        del pipe, vae, tr, opt, params
+        # drop every reference to the transformer and the last step's tensors (``save`` holds the model) so the
+        # stage really frees the GPU
+        del pipe, vae, tr, opt, params, save, sigmas_table
+        del x0, emb, txt_ids, img_ids, noise, sigma, noisy, packed, pred, loss
     (work_dir / "losses.json").write_text(json.dumps(losses), encoding="utf-8")
     return TrainResult(lora_path, losses, previews, time.perf_counter() - t_start, files["transformer"].name)
 

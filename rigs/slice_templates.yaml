@@ -1,0 +1,26 @@
+# Sliced-version templates: how a character's accepted design is drawn again and cut into parts.
+# Each template is a rig (its part sheet is the layout), a pose that keeps the limbs apart so the cut is clean,
+# and whether the parts are refined (hidden areas repainted, face expressions drawn). See ggs.rig.slices.
+format: ggs.slice_templates
+version: 1
+templates:
+  - id: side_simple
+    label: Side view
+    about: Head, body and each arm and leg piece seen from the side, as drawn. Plays every animation in the library.
+    rig: humanoid_side_v1
+    pose: spread
+    refine: false
+  - id: side_detailed
+    label: Side view, detailed
+    about: The side-view pieces with the parts hidden behind arms and legs repainted, plus blinking, shouting and
+      hurt faces. Plays every animation in the library. Takes about twice as long.
+    rig: humanoid_side_v1
+    pose: spread
+    refine: true
+  - id: front
+    label: Front view
+    about: Front-view pieces in a T-pose, for engines that animate with their own bones (Unity 2D Animation,
+      Spine-like tools). The library's animations are side view, so this one exports without them.
+    rig: humanoid_front_v1
+    pose: t_pose
+    refine: false

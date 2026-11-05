@@ -54,10 +54,14 @@ class Stages:
             base = torch.cuda.memory_allocated() / 2**30
         if os.environ.get("GGS_PROGRESS"):  # the desktop app turns these into a progress bar
             print(f"@stage {name}", flush=True)
+        from ggs.pipeline import progress
+
+        progress.enter(name)
         t0 = time.perf_counter()
         try:
             yield
         finally:
+            progress.leave(name)
             gc.collect()
             peak = left = None
             if torch is not None:

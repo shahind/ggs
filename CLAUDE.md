@@ -120,6 +120,12 @@ python -m ggs motion catalog walk angry; python -m ggs motion add walk cmu/02_01
 python tools/make_motion_catalogs.py cmu --src data/mocap/src/cmu-mocap.zip --index data/mocap/src/cmu-index.txt
 python tools/make_motion_library.py   # starter set (motions/clips) with Kimodo; tools/install_kimodo.py installs it
 python -m ggs export cycle.json --character chars/pa/character.yaml --format godot --out build/hero  # or unity|defold
+python -m ggs asset gen Hero --project <dir> --action new --text "a clown"   # refine|regenerate|goto --version N
+python -m ggs asset accept Hero --project <dir>                                # keep the design (items/character/hero/design)
+python -m ggs character slice Hero --project <dir> --template side_simple      # sliced version (rigs/slice_templates.yaml)
+python -m ggs character frames Hero --project <dir> --clip motions/clips/walk.json --frames 8   # drawn frames
+python -m ggs export walk.json punch.json --character <item>/sliced/character.yaml --format godot --out build/hero
+python -m ggs export --character <item>/sliced/character.yaml --format unity --out build/parts  # parts only, no clips
 ```
 
 ## Conventions

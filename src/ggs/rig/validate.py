@@ -126,7 +126,9 @@ def validate_character(character, rig: RigSpec, master: np.ndarray, spec: Master
         if bone.parent is None:
             continue
         cp = cut.parts[p.name]
-        width = max(cp.widths.get("start") or cp.widths.get("end") or 0.0, 4.0)  # core parts have no start cap
+        par_cut = next((q for q in cut.parts.values() if q.part.bone == bone.parent), None)
+        width = max(cp.widths.get("start") or cp.widths.get("end")  # core parts have no start cap
+                    or (par_cut.widths.get("end") if par_cut else None) or 0.03 * spec.height_px, 4.0)
         start = spec.joints[p.bone][0]
         # a joint may be hidden under a part drawn above (in this rig the arms attach where the neck starts)
         # ... but never under the part itself or its own children: that would hide a misplaced joint
@@ -150,8 +152,14 @@ def validate_character(character, rig: RigSpec, master: np.ndarray, spec: Master
 
     # 7. test poses: the puppet stays one piece
     images = {"reassembly": rebuilt}
-    for name, overrides in TEST_POSES.items():
-        angles = {**MASTER_POSE, **overrides}
+    if rig.view == "front":
+        from ggs.rig.poses import FRONT_REST
+
+        tests, base = FRONT_TEST_POSES, FRONT_REST
+    else:
+        tests, base = TEST_POSES, MASTER_POSE
+    for name, overrides in tests.items():
+        angles = {**base, **overrides}
         im = puppet.render_frame(pose_clip(rig, angles, lengths, name), 0, spec.height_px, size, spec.origin)
         on = np.asarray(im)[..., 3] >= 128
         sizes = component_sizes(on)
@@ -167,6 +175,16 @@ def validate_character(character, rig: RigSpec, master: np.ndarray, spec: Master
     diff[m_on & r_on] = (200, 200, 200, 255)
     images["diff"] = Image.fromarray(diff, "RGBA")
     return Report(passed, iou, checks, images)
+
+
+# front-view rigs: arms up and bent, a squat (overrides of the front rest pose)
+FRONT_TEST_POSES: dict[str, dict[str, float]] = {
+    "reach": {"upper_arm_l": 150.0, "forearm_l": 165.0, "hand_l": 165.0,
+              "upper_arm_r": -150.0, "forearm_r": -165.0, "hand_r": -165.0},
+    "bend": {"upper_arm_l": 60.0, "forearm_l": -40.0, "hand_l": -40.0, "upper_arm_r": -30.0, "forearm_r": 70.0,
+             "hand_r": 70.0},
+    "squat": {"thigh_l": 60.0, "shin_l": -10.0, "thigh_r": -60.0, "shin_r": 10.0},
+}
 
 
 def debug_sheet(master_img, report: Report, tile: int = 384):

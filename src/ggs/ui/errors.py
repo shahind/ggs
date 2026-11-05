@@ -11,6 +11,7 @@ STAGES = {  # @stage <name> markers (GGS_PROGRESS=1) -> what the user sees
     "matte": "Cutting it out...",
     "latents": "Preparing your images...",
     "train": "Training the style (this takes a while)...",
+    "control": "Reading the pose...",
     "caption": "Describing your images...",
     "download_drawing": "Downloading the drawing model...",
     "download_cutout": "Downloading the cut-out model...",
@@ -30,6 +31,12 @@ RULES = [
       "Without it you can still make new takes of the Library's starter motions.")),
     (r"each part needs at least",
      "Pick a length between 1 and 10 seconds (all sentences together)."),
+    (r"captioner .*none of|qwen3-vl-2b.*not found|Qwen3-VL.*missing",
+     "Training a style needs the image describer (4 GB). Open Settings > Models and download it."),
+    (r"needs FLUX.2 klein|cannot follow reference images|frame-by-frame sprites need",
+     "Drawn frames need the FLUX.2 klein drawing model. Switch the project's base model to FLUX.2 klein."),
+    (r"no design yet",
+     "Press 'Use this design' on the character first."),
     (r"MissingModelError|none of \[.*\] found|weights missing|not found in \[",
      ("Some AI model files are missing. Open Settings > Models and add the folder that holds them "
      "(for example your ComfyUI models folder).")),
@@ -68,3 +75,47 @@ def friendly_error(raw: str) -> str:
 def stage_text(line: str) -> str | None:
     m = re.match(r"@stage (\w+)", line.strip())
     return STAGES.get(m.group(1), "Working...") if m else None
+
+
+# ---------------------------------------------------------------- pop-ups (Qt imported lazily: the rules above
+# are unit-tested without a display)
+
+def show_message(parent, text: str, title: str = "GGS") -> None:
+    """A plain information pop-up."""
+    from PySide6.QtWidgets import QMessageBox
+
+    QMessageBox.information(parent, title, text)
+
+
+def show_error(parent, raw: str, title: str = "Something went wrong", text: str | None = None) -> None:
+    """An error pop-up: the plain sentence on top, the job's raw output under "Show Details..."."""
+    from PySide6.QtWidgets import QMessageBox
+
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle(title)
+    box.setText(text or friendly_error(raw))
+    if raw.strip():
+        box.setDetailedText(raw.strip()[-6000:])
+    box.setStandardButtons(QMessageBox.StandardButton.Ok)
+    box.exec()
+
+
+def show_saved(parent, title: str, path, text: str | None = None) -> None:
+    """'Saved to ...' with a button that opens the folder."""
+    from pathlib import Path
+
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QDesktopServices
+    from PySide6.QtWidgets import QMessageBox
+
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Information)
+    box.setWindowTitle(title)
+    box.setText(text or (f"Saved to\n{path}" if path else "Done."))
+    open_btn = box.addButton("Open folder", QMessageBox.ButtonRole.ActionRole) if path else None
+    box.addButton(QMessageBox.StandardButton.Ok)
+    box.exec()
+    if open_btn is not None and box.clickedButton() is open_btn:
+        p = Path(path)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(p if p.is_dir() else p.parent)))

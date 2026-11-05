@@ -172,13 +172,24 @@ def preview(ref: str, cell: int = 120) -> Path:
 
 
 def add_to(refs: list[str], dest: Path) -> list[Path]:
-    """Copy catalog motions into a folder (a project's clips folder) as ``<name>.json`` + ``.motion.json``."""
+    """Copy catalog motions into a folder (a project's clips folder) as ``<name>.json`` + ``.motion.json`` (the
+    sidecar keeps where it came from, for the export's CREDITS.txt; file names do not)."""
     dest.mkdir(parents=True, exist_ok=True)
     out = []
     for ref in refs:
         idx, m = find(ref)
         clip = read_clip(ref)
-        path = dest / f"{safe_name(m.name)}_{idx.source}_{m.id}.json"
+        base, n = safe_name(m.name), 1
+        path = dest / f"{base}.json"
+        while path.exists():  # another motion with the same name: number it (the same motion is replaced)
+            try:
+                same = json.loads(path.with_suffix(".motion.json").read_text(encoding="utf-8")).get("id") == m.id
+            except (OSError, ValueError):
+                same = False
+            if same:
+                break
+            n += 1
+            path = dest / f"{base}_{n}.json"
         clip.save(path)
         path.with_suffix(".motion.json").write_text(json.dumps(
             {"catalog": idx.source, "id": m.id, "name": m.name, "credit": idx.credit, "license": idx.license},

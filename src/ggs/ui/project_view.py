@@ -87,6 +87,7 @@ class ProjectView(QWidget):
         split = QSplitter()
         left = QWidget()
         left.setObjectName("panel")
+        left.setMinimumWidth(190)
         lv = QVBoxLayout(left)
         new = QPushButton("New")
         new.setIcon(icon("new"))
@@ -133,10 +134,11 @@ class ProjectView(QWidget):
         chars, assets, anims, styles = (sections[k] for k in ("characters", "assets", "animations", "styles"))
         for s in _styles(self.project):
             QTreeWidgetItem(styles, [s]).setData(0, ROLE_NODE, "styles")
+        from ggs.rig.library import clip_label
         from ggs.ui.animations import _project_clips
 
         for c in _project_clips(self.project):
-            it = QTreeWidgetItem(anims, [c.stem])
+            it = QTreeWidgetItem(anims, [clip_label(c)])
             it.setData(0, ROLE_NODE, "animations")
             it.setData(0, ROLE_CLIP, str(c))
         groups = {}
@@ -216,7 +218,7 @@ class ProjectView(QWidget):
     def _section(self, node: str) -> QWidget:
         if node in self.cache:
             return self.cache[node]
-        from ggs.ui.pages import AppState, StylesPage
+        from ggs.ui.pages import AppState
 
         state = AppState(self.queue)
         state.project = self.project
@@ -233,12 +235,14 @@ class ProjectView(QWidget):
             self.cache[node] = w
             self.stack.addWidget(w)
             return w
-        page = {"styles": StylesPage}.get(node)
-        w = page(state) if page else self.welcome
-        if page:
+        if node == "styles":
+            from ggs.ui.styles import StylesSection
+
+            w = StylesSection(self.queue, self.project, _pipelines(), self.meta().get("base_model"))
             self.cache[node] = w
             self.stack.addWidget(w)
-        return w
+            return w
+        return self.welcome
 
     def new_item(self, preselect: str | None = None) -> None:
         from ggs.ui.wizard import NewItemDialog
@@ -255,16 +259,14 @@ class ProjectView(QWidget):
 
         def done(ok: bool) -> None:
             if not ok:
-                from PySide6.QtWidgets import QMessageBox
+                from ggs.ui.errors import show_error
 
-                from ggs.ui.errors import friendly_error
-
-                QMessageBox.information(self, "GGS", friendly_error("\n".join(job.output)))
+                show_error(self, "\n".join(job.output))
                 return
             self.refresh(select=d)
             w = self.cache.get(str(d))
             if w is not None and kind_id != "character":  # assets start drawing right away; characters wait
-                w._run("new", describe)                     # for the body & pose to be set
+                w.run("new", describe)                      # for the body & pose to be set
 
         job.done = done
         self.queue.submit(job)

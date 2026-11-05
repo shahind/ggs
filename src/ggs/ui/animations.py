@@ -77,7 +77,7 @@ def _packs_ready() -> dict[str, bool]:
 
 
 class Preview(QFrame):
-    """Animated stick-figure preview with a title, details and a credit line."""
+    """Animated stick-figure preview with a title and details."""
 
     def __init__(self):
         super().__init__()
@@ -129,11 +129,8 @@ class LibraryTab(QWidget):
         self.search.textChanged.connect(self._later)
         self.category = QComboBox()
         self.category.currentIndexChanged.connect(self._fill)
-        self.source = QComboBox()
-        self.source.currentIndexChanged.connect(self._fill)
         row.addWidget(self.search, 1)
         row.addWidget(self.category)
-        row.addWidget(self.source)
         left.addLayout(row)
         self.list = QListWidget()
         self.list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -176,10 +173,8 @@ class LibraryTab(QWidget):
                                  "prompt": m.prompt, "credit": "Made with NVIDIA Kimodo", "loop": m.loop})
         except ValueError:
             pass
-        titles = {STARTER: "Starter set"}
         try:
             for idx, m in catalog.all_motions():
-                titles[idx.source] = idx.title
                 rows.append({"source": idx.source, "ref": f"{idx.source}/{m.id}", "name": m.name,
                              "category": m.category, "seconds": m.seconds, "loop": m.loop,
                              "text": " ".join([m.name, m.category, *m.tags, m.id]).lower(),
@@ -188,18 +183,11 @@ class LibraryTab(QWidget):
             pass
         self.rows = rows
         self.category.blockSignals(True)
-        self.source.blockSignals(True)
         self.category.clear()
         self.category.addItem("All kinds", None)
         for c in sorted({r["category"] for r in rows}):
             self.category.addItem(c, c)
-        self.source.clear()
-        self.source.addItem("All sources", None)
-        for s, t in titles.items():
-            if any(r["source"] == s for r in rows):
-                self.source.addItem(t, s)
         self.category.blockSignals(False)
-        self.source.blockSignals(False)
         self._fill()
 
     def _later(self) -> None:
@@ -207,9 +195,8 @@ class LibraryTab(QWidget):
 
     def _fill(self) -> None:
         terms = self.search.text().lower().split()
-        cat, src = self.category.currentData(), self.source.currentData()
-        hits = [r for r in self.rows if (not cat or r["category"] == cat) and (not src or r["source"] == src)
-                and all(t in r["text"] for t in terms)]
+        cat = self.category.currentData()
+        hits = [r for r in self.rows if (not cat or r["category"] == cat) and all(t in r["text"] for t in terms)]
         self.list.clear()
         for r in hits[:2000]:
             it = QListWidgetItem(f"{r['name']}    {r['seconds']:.1f} s" + ("  (loop)" if r.get("loop") else ""))
@@ -234,7 +221,7 @@ class LibraryTab(QWidget):
                 gif = catalog.preview(r["ref"], cell=200)
         except Exception:  # noqa: BLE001 - a broken clip shows "no preview"
             gif = None
-        info = f"{r['category']} - {r['seconds']:.1f} s. {r.get('note', '')}\n{r['credit']}"
+        info = f"{r['category']} - {r['seconds']:.1f} s. {r.get('note', '')}".strip()
         self.preview.show_gif(r["name"], gif, info)
 
     def _add(self) -> None:
@@ -358,9 +345,10 @@ class DescribeTab(QWidget):
         def done(ok: bool) -> None:
             self.go.setEnabled(True)
             if not ok:
-                from ggs.ui.errors import friendly_error
+                from ggs.ui.errors import show_error
 
-                self.note.setText(friendly_error("\n".join(job.output)))
+                self.note.setText("")
+                show_error(self, "\n".join(job.output), "The animation was not made")
                 return
             self.note.setText("")
             self.page.refresh_project(True)
@@ -395,13 +383,13 @@ class ProjectTab(QWidget):
         self.list.currentItemChanged.connect(self._pick)
         lay.addWidget(self.list, 3)
         self.preview = Preview()
-        use = QPushButton("Export with a character...")
-        use.setObjectName("primary")
-        use.clicked.connect(self._export)
         rm = QPushButton("Remove")
         rm.clicked.connect(self._remove)
-        self.preview.buttons.addWidget(use)
         self.preview.buttons.addWidget(rm)
+        hint = QLabel("To put an animation on a character, open the character and use its Animate tab.")
+        hint.setObjectName("muted")
+        hint.setWordWrap(True)
+        self.preview.layout().addWidget(hint)
         lay.addWidget(self.preview, 2)
 
     def refresh(self, select: Path | None = None) -> None:
@@ -434,7 +422,7 @@ class ProjectTab(QWidget):
         if side.is_file():
             try:
                 meta = json.loads(side.read_text(encoding="utf-8"))
-                info = meta.get("prompt") or meta.get("credit") or ""
+                info = meta.get("prompt") or ""
             except (OSError, ValueError):
                 pass
         try:
@@ -455,24 +443,12 @@ class ProjectTab(QWidget):
             f.unlink(missing_ok=True)
         self.page.refresh_project(True)
 
-    def _export(self) -> None:
-        it = self.list.currentItem()
-        exp = self.page.export
-        exp._refresh()
-        if it is not None:
-            i = exp.clip.findData(Path(it.data(ROLE)))
-            if i >= 0:
-                exp.clip.setCurrentIndex(i)
-        self.page.tabs.setCurrentWidget(exp)
-
 
 class AnimationsPage(QWidget):
     changed = Signal()  # the project's animations changed (the project tree lists them)
 
     def __init__(self, queue: JobQueue, project: Path, state):
         super().__init__()
-        from ggs.ui.pages import AnimatePage
-
         self.queue, self.project = queue, Path(project)
         lay = QVBoxLayout(self)
         h = QLabel("Animations")
@@ -482,11 +458,9 @@ class AnimationsPage(QWidget):
         self.mine = ProjectTab(self)
         self.library = LibraryTab(self)
         self.describe = DescribeTab(self)
-        self.export = AnimatePage(state)
         self.tabs.addTab(self.mine, "In this project")
         self.tabs.addTab(self.library, "Library")
         self.tabs.addTab(self.describe, "Describe a motion")
-        self.tabs.addTab(self.export, "Export")
         self.tabs.currentChanged.connect(self._tab)
         lay.addWidget(self.tabs, 1)
         self.mine.refresh()
@@ -495,13 +469,10 @@ class AnimationsPage(QWidget):
         w = self.tabs.widget(i)
         if w is self.describe:
             self.describe.check()
-        elif w is self.export:
-            self.export._refresh()
 
     def refresh_project(self, ok: bool = True) -> None:
         if ok:
             self.mine.refresh()
-            self.export._refresh()
             self.changed.emit()
 
     def show_clip(self, path: Path) -> None:
