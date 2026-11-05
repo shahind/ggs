@@ -43,7 +43,7 @@ QT_KEEP_MODULES = {"Core", "Gui", "Widgets", "Svg", "Network", "OpenGL", "OpenGL
 QT_KEEP_PLUGINS = {"platforms", "imageformats", "styles", "iconengines", "generic", "platforminputcontexts", "tls"}
 QT_SKIP_DIRS = {"resources", "qml", "metatypes", "include", "typesystems", "glue", "doc", "scripts", "support"}
 QT_SKIP_FILES = ["av*.dll", "sw*.dll", "opengl32sw.dll", "*.exe"]
-DATA = ["recipes", "rigs", "clips"]
+DATA = ["recipes", "rigs", "clips", "motions"]
 MODEL_YAML = ["registry.yaml", "pipelines.yaml", "downloads.yaml"]
 
 
@@ -152,6 +152,11 @@ def build(dist: Path, skip_site: bool = False) -> Path:
     (py / f"python{ver}._pth").write_text("Lib\nDLLs\nLib\\site-packages\nimport site\n", encoding="utf-8")
     subprocess.run([str(py / "python.exe"), "-m", "compileall", "-q", str(psite / "ggs")], check=True)
 
+    missing = [p for p in ("motions/catalogs/cmu.zip", "motions/catalogs/100style.zip", "motions/clips/walk.json")
+               if not (ROOT / p).is_file()]
+    if missing:
+        raise SystemExit(f"motion library not built ({missing}): run tools/make_motion_catalogs.py (cmu, 100style) "
+                         "and tools/make_motion_library.py first")
     for d in DATA:
         if (app / d).exists():
             shutil.rmtree(app / d)
@@ -164,6 +169,7 @@ def build(dist: Path, skip_site: bool = False) -> Path:
     lic.mkdir(exist_ok=True)
     shutil.copy2(ROOT / "docs" / "LICENSE_REVIEW.md", lic / "LICENSE_REVIEW.md")
     shutil.copy2(base / "LICENSE.txt", lic / "Python-LICENSE.txt")
+    shutil.copy2(ROOT / "motions" / "CREDITS.md", lic / "Motion-CREDITS.md")
     (app / "ggs.cmd").write_text('@echo off\r\n"%~dp0python\\python.exe" -m ggs %*\r\n', encoding="utf-8")
     (app / "Start GGS.cmd").write_text('@echo off\r\nstart "" "%~dp0python\\pythonw.exe" -m ggs.ui.app %*\r\n',
                                  encoding="utf-8")

@@ -67,6 +67,8 @@ def pack_ready(pack: Pack) -> bool:
         load_pipelines,
         resolve_captioner,
         resolve_matting,
+        resolve_motion,
+        resolve_motion_text,
         resolve_pipeline,
     )
 
@@ -78,6 +80,10 @@ def pack_ready(pack: Pack) -> bool:
             resolve_matting(name, spec_file=spec)
         for name in pack.ready_when.get("captioning", []):
             resolve_captioner(name, spec_file=spec)
+        for name in pack.ready_when.get("motion", []):
+            resolve_motion(name, spec_file=spec)
+        for name in pack.ready_when.get("motion_text", []):
+            resolve_motion_text(name, spec_file=spec)
     except (MissingModelError, ValueError):
         return False
     return True

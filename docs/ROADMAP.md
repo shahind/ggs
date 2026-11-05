@@ -15,7 +15,7 @@ Each milestone is done only when its acceptance check passes. Update this file a
 | M7 | Equipment, IK, hold poses, animation layers, mounts, quadruped rig | Character rides a horse and swings a sword; upper/lower body layered correctly | equipment, two-hand IK, keyframe clips and layers done (knight walks with a sword, swings while walking, carries a spear two-handed; items in Godot/Unity/Defold). Mounts and the quadruped rig moved after v1 |
 | M8 | Other recipes: background (+parallax layers), tile (seamless), UI kit (9-slice + states), VFX (sheets + particle textures) | Each recipe has preset, QA rules, and exporter tests | done for v1: background (+far layer, wrap), tile, ui_panel, ui_icon, vfx; matted parallax foreground layers and VFX flipbooks moved after v1 |
 | M9 | Desktop UI: projects, collections, style/asset-type/format dropdowns, preview | Create project, train style, generate a rigged animated character without the CLI | v1 built (PySide6, `ggs ui`): every page drives the CLI; checked offscreen and with screenshots, not yet clicked through end to end by the owner. Collections and packaging (installer) after v1 |
-| M10 | Text-to-motion (Kimodo) + motion library browser | Prompt -> BVH -> clip; license-auditor sign-off recorded in the registry | rig-engineer, license-auditor |
+| M10 | Text-to-motion (Kimodo) + motion library browser | Prompt -> BVH -> clip; license-auditor sign-off recorded in the registry | done (2026-11-04): `ggs motion make/library/catalog/add`, Animations page (project, Library, Describe, Export); starter set + CMU + 100STYLE catalogs bundled |
 | v2 | 3D model generation | out of scope for now | |
 
 ## M1 notes
@@ -136,6 +136,23 @@ Each milestone is done only when its acceptance check passes. Update this file a
 - Installer: done in v2 (portable Python + Inno Setup, first-run model downloads; see V2_PLAN section 4).
 - Not in v1: collections (labels bound to recipes), drag-and-drop,
   per-asset re-run/upscale, thumbnails of animations in the grid, cancel that also cleans partial outputs.
+
+## M10 notes
+- Text to motion: NVIDIA Kimodo SOMA-RP v1.2 (`src/ggs/pipeline/motion.py`). Text encoder = LLM2Vec on
+  Llama-3-8B-Instruct (ungated NousResearch copy + McGill adapters), kept in RAM in bf16 and streamed block by
+  block (RTX 4060 Laptop: 31 s per new sentence, 0.98 GB peak; embeddings cached per sentence). Kimodo itself:
+  1.1 GB peak, ~6 s per 3 s take. Kimodo's BVH goes through the rig's new `soma` mocap profile.
+- Kimodo is installed as pure Python (`tools/install_kimodo.py`); its foot-contact post-process needs a C++
+  build and is off. Its BVH carries a `Root` joint on the floor ~1 m under the feet, so the retargeter now
+  measures height and ground from the mapped joints only.
+- Packs: `motion` (1.1 GB, Kimodo) and `motion_text` (15.3 GB, Llama 3 + adapters; needs ~16 GB RAM). The
+  starter set's text embeddings ship in `motions/embeds`, so new takes of those work with `motion` alone.
+- Library: `motions/library.yaml` (21 Kimodo-made starter motions, `tools/make_motion_library.py`),
+  `motions/catalogs/cmu.zip` (2,548 takes, 9.9 h, 26.5 MB) and `100style.zip` (700 style loops, 1 MB) from
+  `tools/make_motion_catalogs.py`. Catalog clips store absolute angles at 0.1 deg only; local angles are rebuilt
+  on load. Previews are drawn on demand. BONES-SEED was rejected (licence: no redistribution, revenue cap, 43 GB).
+- 100STYLE takes are long laps; the converter picks the straightest 4 s window, then cuts a loop.
+- Not yet: trimming a long CMU take to a range in the app, layering library motions, multi-clip export.
 
 ## Open decisions for the owner
 - Hard rule 5 vs VFX: is brightness-as-alpha for additive particle textures acceptable? (It is how emissive

@@ -1,0 +1,55 @@
+# Starter animation library (M10). Every motion was made with NVIDIA Kimodo from the prompt below by
+# `python tools/make_motion_library.py`, then retargeted to humanoid_side_v1 (motions/clips/<name>.json, with a
+# stick-figure preview <name>.gif). The prompts' text embeddings ship in motions/embeds, so the motion model
+# alone (no text encoder) can make new takes of these: `ggs motion make --prompt "<the prompt>" --seed 7 ...`.
+# loop: cut a seamless cycle (between min and max seconds) out of the take. in_place: remove forward travel.
+format: ggs.motions
+version: 1
+motions:
+  # moving around
+  - {name: idle,        category: Moving, label: Idle,          seconds: 5.0, seed: 0, loop: true, in_place: true,
+     loop_seconds: [2.0, 4.0],
+     prompt: "A person stands still and breathes calmly, shifting weight slightly."}
+  - {name: walk,        category: Moving, label: Walk,          seconds: 4.0, seed: 0, loop: true,
+     prompt: "A person walks forward at a normal pace."}
+  - {name: run,         category: Moving, label: Run,           seconds: 3.0, seed: 0, loop: true,
+     prompt: "A person runs forward quickly."}
+  - {name: sneak,       category: Moving, label: Sneak,         seconds: 4.0, seed: 0, loop: true,
+     prompt: "A person sneaks forward slowly, crouched low."}
+  - {name: jump,        category: Moving, label: Jump,          seconds: 2.5, seed: 0, in_place: true,
+     prompt: "A person jumps straight up and lands in place."}
+  - {name: jump_forward, category: Moving, label: Long jump,    seconds: 3.0, seed: 0,
+     prompt: "A person runs a few steps and jumps forward."}
+  - {name: crouch,      category: Moving, label: Crouch down,   seconds: 2.5, seed: 0, in_place: true,
+     prompt: "A person crouches down and stands back up."}
+  - {name: climb,       category: Moving, label: Climb,         seconds: 4.0, seed: 0, loop: true, in_place: true,
+     loop_seconds: [1.0, 2.5],
+     prompt: "A person climbs up a ladder."}
+  # fighting
+  - {name: punch,       category: Fighting, label: Punch,       seconds: 2.0, seed: 0, in_place: true,
+     prompt: "A person punches forward with the right fist."}
+  - {name: kick,        category: Fighting, label: Kick,        seconds: 2.0, seed: 0, in_place: true,
+     prompt: "A person kicks forward with the right leg."}
+  - {name: slash,       category: Fighting, label: Sword slash, seconds: 2.0, seed: 0, in_place: true,
+     prompt: "A person slashes a sword downward with the right hand."}
+  - {name: heavy_strike, category: Fighting, label: Two-hand strike, seconds: 2.5, seed: 0, in_place: true,
+     prompt: "A person swings a heavy hammer overhead with both hands."}
+  - {name: block,       category: Fighting, label: Block,       seconds: 2.0, seed: 0, in_place: true,
+     prompt: "A person raises both arms to block a hit."}
+  - {name: throw,       category: Fighting, label: Throw,       seconds: 2.0, seed: 0, in_place: true,
+     prompt: "A person throws a ball overhand with the right hand."}
+  - {name: cast,        category: Fighting, label: Cast spell,  seconds: 2.5, seed: 0, in_place: true,
+     prompt: "A person casts a spell, pushing both hands forward."}
+  - {name: hurt,        category: Fighting, label: Get hit,     seconds: 1.5, seed: 0, in_place: true,
+     prompt: "A person gets hit in the chest and staggers backward."}
+  - {name: death,       category: Fighting, label: Fall down,   seconds: 3.0, seed: 0, in_place: true,
+     prompt: "A person falls backward to the ground and lies still."}
+  # other
+  - {name: wave,        category: Other, label: Wave,           seconds: 2.5, seed: 0, in_place: true,
+     prompt: "A person waves with the right hand."}
+  - {name: cheer,       category: Other, label: Cheer,          seconds: 2.5, seed: 0, in_place: true,
+     prompt: "A person cheers with both arms raised."}
+  - {name: pick_up,     category: Other, label: Pick up,        seconds: 2.5, seed: 0, in_place: true,
+     prompt: "A person bends down and picks something up from the floor."}
+  - {name: dance,       category: Other, label: Dance,          seconds: 4.0, seed: 0, in_place: true,
+     prompt: "A person dances happily."}

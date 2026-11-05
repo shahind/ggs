@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -907,6 +908,109 @@ def cmd_clip_loop(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_motion_make(args: argparse.Namespace) -> int:
+    """Text -> 3D motion (Kimodo) -> BVH -> 2D clip (+ .gif preview, + .motion.json with prompt and seed)."""
+    from ggs.hardware import detect_vram_gb, profile_for
+    from ggs.pipeline.models import MissingModelError
+    from ggs.pipeline.motion import MODEL, MotionError, generate, save_bvh
+    from ggs.pipeline.vram import Stages, VramBudgetError
+    from ggs.rig.library import to_clip, write_sidecar
+    from ggs.rig.preview import render_preview
+    from ggs.rig.retarget import RetargetError
+
+    out = Path(args.out)
+    seeds = [args.seed + i for i in range(args.count)]
+    try:
+        spec = load_rig_spec(args.rig)
+        seconds = [float(s) for s in args.seconds.split()] if isinstance(args.seconds, str) else args.seconds
+        seconds = seconds[0] if len(seconds) == 1 else seconds
+        stages = Stages(profile=profile_for(detect_vram_gb()))
+        takes = generate(args.prompt, seconds, seeds, stages, steps=args.steps)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        for take in takes:
+            stem = out.stem if len(takes) == 1 else f"{out.stem}_{take.seed}"
+            bvh = save_bvh(take, out.with_name(stem + ".bvh"))
+            clip = to_clip(bvh, spec, loop=args.loop, in_place=args.in_place,
+                           loop_seconds=(args.loop_min, args.loop_max))
+            path = out.with_name(stem + ".json")
+            clip.save(path)
+            render_preview(spec, clip, path.with_suffix(".gif"), cell=args.cell)
+            write_sidecar(path, {"prompt": args.prompt, "seconds": seconds, "seed": take.seed, "model": MODEL,
+                                 "steps": args.steps, "loop": args.loop, "in_place": args.in_place,
+                                 "frames_3d": take.frames})
+            print(f"wrote {path}: {clip.frame_count} frames at {clip.fps:g} fps ({clip.duration:.2f} s), "
+                  f"seed {take.seed}", flush=True)
+            for w in clip.warnings:
+                print(f"warning: {w}")
+    except MissingModelError as exc:
+        print(f"ERROR: {exc}\nDownload the motion packs: ggs models fetch motion (and motion_text for new "
+              "prompts).", file=sys.stderr)
+        return 1
+    except (MotionError, RetargetError, VramBudgetError, ValueError, OSError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_motion_library(args: argparse.Namespace) -> int:
+    from ggs.pipeline.motion import find_embed, split_prompt
+    from ggs.rig.library import library_clip, load_library
+
+    try:
+        lib = load_library()
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    rows = []
+    for m in lib.motions:
+        clip = library_clip(m.name)
+        rows.append({**m.model_dump(), "clip": str(clip) if clip.is_file() else None,
+                     "preview": str(clip.with_suffix(".gif")) if clip.with_suffix(".gif").is_file() else None,
+                     "embedded": all(find_embed(t) for t in split_prompt(m.prompt))})
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return 0
+    for r in rows:
+        state = "ready" if r["clip"] else "no clip"
+        print(f"{r['name']:<14} {r['category']:<9} {r['seconds']:4.1f} s  {state:<8} {r['prompt']}")
+    return 0
+
+
+def cmd_motion_add(args: argparse.Namespace) -> int:
+    """Library names (``walk``) and catalog references (``cmu/02_01``) into a project's clips."""
+    from ggs.rig import catalog
+    from ggs.rig.library import add_to
+
+    dest = Path(args.out) if args.out else Path(args.project) / "clips"
+    try:
+        refs = [n for n in args.names if "/" in n]
+        names = [n for n in args.names if "/" not in n]
+        for p in [*add_to(names, dest), *catalog.add_to(refs, dest)]:
+            print(f"added {p}")
+    except (KeyError, FileNotFoundError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_motion_catalog(args: argparse.Namespace) -> int:
+    """Search the bundled motion catalogs (CMU, 100STYLE)."""
+    from ggs.rig import catalog
+
+    try:
+        hits = catalog.search(" ".join(args.words), category=args.category, source=args.source)
+    except (ValueError, OSError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps([{"ref": f"{i.source}/{m.id}", **m.model_dump()} for i, m in hits[: args.limit]], indent=1))
+        return 0
+    for i, m in hits[: args.limit]:
+        print(f"{i.source + '/' + m.id:<22} {m.category:<13} {m.seconds:6.1f} s  {m.name}")
+    print(f"{len(hits)} motions" + (f" (first {args.limit} shown)" if len(hits) > args.limit else ""))
+    return 0
+
+
 def cmd_export(args: argparse.Namespace) -> int:
     from ggs.export.animated import ExportError, parse_color, save_apng, save_gif, save_webp
     from ggs.export.pack import PackError
@@ -1138,6 +1242,42 @@ def build_parser() -> argparse.ArgumentParser:
     pv.add_argument("--frames", type=int, default=8, help="frames in a PNG strip")
     pv.add_argument("--cell", type=int, default=160, help="pixel size of one frame")
     pv.set_defaults(func=cmd_mocap_preview)
+
+    mo = sub.add_parser("motion", help="animations from text (Kimodo) and the starter library").add_subparsers(
+        dest="motion_cmd", required=True
+    )
+    mm = mo.add_parser("make", help="text -> motion -> clip .json (+ .bvh, .gif preview, .motion.json)")
+    mm.add_argument("--prompt", required=True,
+                    help='what the person does; several sentences play one after another ("A person walks. '
+                         'The person jumps.")')
+    mm.add_argument("--seconds", default="3", help="length (1-10 s); one value, or one per sentence: \"2 1.5\"")
+    mm.add_argument("--seed", type=int, default=0)
+    mm.add_argument("--count", type=int, default=1, help="takes with seeds seed..seed+count-1 (out_<seed>.json)")
+    mm.add_argument("--steps", type=int, default=100, help="denoising steps")
+    mm.add_argument("--loop", action="store_true", help="cut a seamless cycle out of the take")
+    mm.add_argument("--loop-min", type=float, default=0.6, help="shortest loop, seconds")
+    mm.add_argument("--loop-max", type=float, default=1.6, help="longest loop, seconds")
+    mm.add_argument("--in-place", action="store_true", help="remove forward travel")
+    mm.add_argument("--cell", type=int, default=160, help="preview frame size in pixels")
+    mm.add_argument("--rig", default=str(DEFAULT_RIG))
+    mm.add_argument("--out", required=True, help="clip .json")
+    mm.set_defaults(func=cmd_motion_make)
+    ml = mo.add_parser("library", help="list the starter animation library")
+    ml.add_argument("--json", action="store_true")
+    ml.set_defaults(func=cmd_motion_library)
+    mc = mo.add_parser("catalog", help="search the bundled motion catalogs (CMU, 100STYLE)")
+    mc.add_argument("words", nargs="*", help="words that must all appear, e.g. walk angry")
+    mc.add_argument("--category", default=None)
+    mc.add_argument("--source", default=None, help="cmu or 100style")
+    mc.add_argument("--limit", type=int, default=50)
+    mc.add_argument("--json", action="store_true")
+    mc.set_defaults(func=cmd_motion_catalog)
+    ma = mo.add_parser("add", help="copy library animations (walk) or catalog motions (cmu/02_01) into a project")
+    ma.add_argument("names", nargs="+")
+    ma_where = ma.add_mutually_exclusive_group(required=True)
+    ma_where.add_argument("--project")
+    ma_where.add_argument("--out", help="folder")
+    ma.set_defaults(func=cmd_motion_add)
 
     char = sub.add_parser("character", help="character part sheets").add_subparsers(
         dest="character_cmd", required=True

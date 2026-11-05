@@ -23,3 +23,7 @@ cache/
 # app build output
 dist/
 build/
+# M10 motion library: generated from data/ and Kimodo by tools/make_motion_*.py (hard rule 8), bundled by build_app
+motions/catalogs/
+motions/clips/
+motions/embeds/

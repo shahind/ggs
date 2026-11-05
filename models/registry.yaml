@@ -139,12 +139,26 @@ entries:
 
   - id: kimodo-soma
     kind: motion
-    name: NVIDIA Kimodo (SOMA skeleton)
+    name: NVIDIA Kimodo SOMA-RP v1.2 (text to motion)
     license: NVIDIA Open Model License
+    commercial: "yes"
+    min_vram_gb: 2        # measured 1.1 GB peak on the RTX 4060 Laptop (3 s take, 100 steps, ~6 s)
+    source: https://huggingface.co/nvidia/Kimodo-SOMA-RP-v1.2
+    notes: "The LICENSE file in the repo (read 2026-11-04) says 'Models are commercially usable' and NVIDIA
+      does not claim ownership of outputs; the card says 'ready for commercial use'. Code (kimodo package) is
+      Apache-2.0. Its foot-contact post-process needs a compiled C++ extension and is not used."
+
+  - id: llm2vec-llama3-8b
+    kind: component
+    name: LLM2Vec Llama-3-8B-Instruct (MNTP + supervised adapters), Kimodo's text encoder
+    license: Meta Llama 3 Community License (base weights) + MIT (McGill-NLP adapters)
     commercial: verify
-    min_vram_gb: 5        # community NF4 fork ~5GB; official ~17GB unless text encoder runs on CPU
-    source: https://huggingface.co/nvidia/Kimodo-G1-RP-v1
-    notes: The G1 model card says ready for commercial use. Confirm the SOMA model card says the same.
+    min_vram_gb: 1        # streamed block by block from RAM (needs ~16 GB system RAM)
+    source: https://huggingface.co/NousResearch/Meta-Llama-3-8B-Instruct
+    notes: "Base weights are Meta's (the NousResearch copy is ungated; same files as meta-llama/...). Llama 3
+      licence: commercial use allowed under 700M monthly users, attribution 'Built with Meta Llama 3' when
+      distributing; GGS does not distribute the weights (the user downloads them). Adapters:
+      McGill-NLP/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp(-supervised), MIT. Only text embeddings are used."
 
   - id: hy-motion-1.0
     kind: motion
@@ -165,8 +179,19 @@ entries:
 
   - id: cmu-mocap
     kind: dataset
-    name: CMU Motion Capture Database (BVH)
-    license: CMU terms
-    commercial: verify
-    source: https://www.roboticscenter.ai/datasets/cmu-mocap/
-    notes: Described as free for all uses. Confirm on CMU's own site; do not resell raw data.
+    name: CMU Graphics Lab Motion Capture Database (BVH, Bruce Hahne conversion)
+    license: CMU terms ("free for use in research and commercial projects")
+    commercial: "yes"
+    source: http://mocap.cs.cmu.edu
+    notes: "Terms quoted in READMEFIRST.txt of the cgspeed release (mirror github.com/meshula/cmu-mocap); the
+      converter adds no restrictions. Credit: 'The data used in this project was obtained from mocap.cs.cmu.edu.'
+      Bundled as converted 2D clips in motions/catalogs/cmu.zip."
+
+  - id: 100style
+    kind: dataset
+    name: The 100STYLE Dataset (Ian Mason)
+    license: CC BY 4.0
+    commercial: "yes"
+    source: https://zenodo.org/record/8127870
+    notes: "Attribution required: 'The 100STYLE Dataset - Ian Mason'. Bundled as converted 2D loops in
+      motions/catalogs/100style.zip."

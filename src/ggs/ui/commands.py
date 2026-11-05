@@ -103,6 +103,21 @@ def retarget(bvh: Path, out: Path, profile: str = "cmu_bvh", fps: int = 24) -> l
     return [*GGS, "mocap", "retarget", str(bvh), "--profile", profile, "--fps", str(fps), "--out", str(out)]
 
 
+def motion_make(prompt: str, out: Path, *, seconds: float = 3.0, seed: int = 0, count: int = 1,
+                loop: bool = False, in_place: bool = False) -> list[str]:
+    a = [*GGS, "motion", "make", "--prompt", prompt, "--seconds", f"{seconds:g}", "--seed", str(seed),
+         "--count", str(count), "--out", str(out)]
+    if loop:
+        a.append("--loop")
+    if in_place:
+        a.append("--in-place")
+    return a
+
+
+def motion_add(refs: list[str], project: Path) -> list[str]:
+    return [*GGS, "motion", "add", *refs, "--project", str(project)]
+
+
 def clip_loop(clip: Path, out: Path) -> list[str]:
     return [*GGS, "clip", "loop", str(clip), "--out", str(out)]
 

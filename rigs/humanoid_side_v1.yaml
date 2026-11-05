@@ -134,5 +134,38 @@ mocap_profiles:
     thigh_far:      [LeftUpLeg, LeftLeg]
     shin_far:       [LeftLeg, LeftFoot]
     foot_far:       [LeftFoot, LeftToeBase]
-  # TODO(M10): fill from the Kimodo SOMA skeleton docs. Empty = not mapped yet.
-  soma: {}
+  # 100STYLE (XSens, 60 fps, centimetres, y up). Hands and toes end in End Sites (<joint>_End).
+  xsens_100style:
+    pelvis:         [Hips, Chest]
+    torso:          [Chest, Neck]
+    head:           [Neck, Head_End]
+    upper_arm_near: [RightShoulder, RightElbow]
+    forearm_near:   [RightElbow, RightWrist]
+    hand_near:      [RightWrist, RightWrist_End]
+    upper_arm_far:  [LeftShoulder, LeftElbow]
+    forearm_far:    [LeftElbow, LeftWrist]
+    hand_far:       [LeftWrist, LeftWrist_End]
+    thigh_near:     [RightHip, RightKnee]
+    shin_near:      [RightKnee, RightAnkle]
+    foot_near:      [RightAnkle, RightToe]
+    thigh_far:      [LeftHip, LeftKnee]
+    shin_far:       [LeftKnee, LeftAnkle]
+    foot_far:       [LeftAnkle, LeftToe]
+  # NVIDIA Kimodo SOMA output (somaskel77 BVH, centimetres, y up). Hips->Spine1 is only 5 cm, so the pelvis
+  # runs to Spine2; the hand points at the middle finger's second joint (Middle1 is 3 cm from the wrist).
+  soma:
+    pelvis:         [Hips, Spine2]
+    torso:          [Spine2, Neck1]
+    head:           [Neck1, HeadEnd]
+    upper_arm_near: [RightArm, RightForeArm]
+    forearm_near:   [RightForeArm, RightHand]
+    hand_near:      [RightHand, RightHandMiddle2]
+    upper_arm_far:  [LeftArm, LeftForeArm]
+    forearm_far:    [LeftForeArm, LeftHand]
+    hand_far:       [LeftHand, LeftHandMiddle2]
+    thigh_near:     [RightLeg, RightShin]
+    shin_near:      [RightShin, RightFoot]
+    foot_near:      [RightFoot, RightToeBase]
+    thigh_far:      [LeftLeg, LeftShin]
+    shin_far:       [LeftShin, LeftFoot]
+    foot_far:       [LeftFoot, LeftToeBase]

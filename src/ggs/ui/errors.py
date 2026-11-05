@@ -16,9 +16,20 @@ STAGES = {  # @stage <name> markers (GGS_PROGRESS=1) -> what the user sees
     "download_cutout": "Downloading the cut-out model...",
     "download_sdxl": "Downloading SDXL...",
     "download_captioner": "Downloading the image describer...",
+    "download_motion": "Downloading the motion model...",
+    "download_motion_text": "Downloading the motion text reader...",
+    "motion_text": "Reading your description (about half a minute)...",
+    "motion": "Animating...",
 }
 
 RULES = [
+    (r"motion model kimodo-soma: none of|ggs models fetch motion\b",
+     "The motion model is not downloaded yet. Press 'Download motion models...' (1.1 GB)."),
+    (r"kimodo-soma text encoder|text encoder adapter",
+     ("Describing new motions needs the motion text reader (15 GB download, and 16 GB of computer memory). "
+      "Without it you can still make new takes of the Library's starter motions.")),
+    (r"each part needs at least",
+     "Pick a length between 1 and 10 seconds (all sentences together)."),
     (r"MissingModelError|none of \[.*\] found|weights missing|not found in \[",
      ("Some AI model files are missing. Open Settings > Models and add the folder that holds them "
      "(for example your ComfyUI models folder).")),

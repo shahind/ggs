@@ -17,16 +17,20 @@ Status key: **used** = the code loads it today; **candidate** = on disk or plann
 | SDXL base 1.0 | stabilityai/stable-diffusion-xl-base-1.0 (fp16 files) | CreativeML Open RAIL++-M (LICENSE.md, 2026-11-03) | yes, with use restrictions that must be passed on to users | **used** | second base model: generation + style training |
 | SDXL VAE fp16 fix | madebyollin/sdxl-vae-fp16-fix | MIT (hub card, 2026-11-03) | yes per card | **used** | SDXL decoding/encoding |
 | SDXL-Lightning 8-step LoRA | ByteDance/SDXL-Lightning | openrail++ (hub card, 2026-11-03) | yes per card | **used** | 8-step SDXL generation |
-| CMU motion capture (BVH) | meshula/cmu-mocap mirror of the Bruce Hahne release | CMU: "free for research and commercial projects" (quoted in the release README) | likely yes; **verify** on CMU's site | **used** (dev data) | M1/M2 walk clip |
+| CMU motion capture (BVH) | meshula/cmu-mocap mirror of the Bruce Hahne release | CMU: "free for use in research and commercial projects" (READMEFIRST.txt; mocap.cs.cmu.edu had a TLS error 2026-11-04) | yes | **used**, **bundled** as 2D clips (`motions/catalogs/cmu.zip`) | animation library; credit line in `motions/CREDITS.md` |
+| 100STYLE | zenodo.org/record/8127870 (Ian Mason) | CC BY 4.0 | yes, with attribution | **used**, **bundled** as 2D loops (`motions/catalogs/100style.zip`) | styled walk/run/idle loops; credit "The 100STYLE Dataset - Ian Mason" |
 | FLUX.2 klein base 4B | ComfyUI `diffusion_models/flux-2-klein-base-4b.safetensors` | not checked | **verify** | candidate | style-LoRA training (M4) |
 | Qwen-Image 2.1 (native RGBA) | ComfyUI `qwen_image_2.1_int8_convrot` + `qwen3.5_9b` text encoder | Qwen Research License (registry) | **no** | candidate | could replace matting (native transparency) |
 | Krea 2 turbo | ComfyUI `krea2_turbo_fp8_scaled` | not checked | **verify** | candidate | alternative base model |
 | fal klein 4B sprite-sheet LoRA | fal/flux-2-klein-4b-spritesheet-lora | unknown | **verify** | candidate | multi-angle sheets |
 | svntax pixel 4-walk LoRA | svntax-dev/pixel_spritesheet_4walk_small_lora_v1 | unknown | **verify** | candidate | pixel walk sheets |
-| Kimodo SOMA | nvidia/Kimodo | NVIDIA Open Model License | **verify** | candidate | text-to-motion (M10) |
+| Kimodo SOMA-RP v1.2 | nvidia/Kimodo-SOMA-RP-v1.2 (downloaded on demand) | NVIDIA Open Model License (LICENSE in the repo, read 2026-11-04: "Models are commercially usable", no claim on outputs) | yes | **used** | text to motion; starter motion set |
+| Kimodo code | github.com/nv-tlabs/kimodo (pure-Python package, bundled in the app) | Apache-2.0 | yes | **used**, **bundled** | Kimodo runtime |
+| Llama-3-8B-Instruct + LLM2Vec adapters | NousResearch/Meta-Llama-3-8B-Instruct (ungated copy of Meta's weights) + McGill-NLP LLM2Vec mntp / mntp-supervised (MIT) | Meta Llama 3 Community License | yes under 700M monthly users; GGS does not redistribute the weights (users download them); **verify** that using an unofficial mirror is acceptable | **used** | Kimodo's text encoder (embeddings only) |
 
 Not usable, even in the final product, without a separate license: RMBG-2.0 (CC BY-NC 4.0), FLUX.2 klein 9B
-(non-commercial), and MoMask / MDM / T2M-GPT (AMASS-derived, non-commercial).
+(non-commercial), MoMask / MDM / T2M-GPT (AMASS-derived, non-commercial), and BONES-SEED (Kimodo's training
+set: academic or <$1M-revenue use only, no redistribution of raw or derived data; owner rejected it 2026-11-04).
 
 Software dependencies to ship with their licences: PySide6 / Qt (LGPL-3.0, desktop app), diffusers,
 transformers, peft, torch (Apache-2.0 / BSD-style).
@@ -40,6 +44,9 @@ pyyaml, requests, huggingface_hub, diffusers, transformers, accelerate, peft, sa
 einops and their dependencies (permissive licences; collect each package's licence file into `licenses/` before
 release). **No main model weights are bundled**: the app downloads them on first run from the repos in
 `models/downloads.yaml` (the same rows as the table above). **LoRAs are bundled** (owner, 2026-11-04): the
-SDXL-Lightning 8-step LoRA (394 MB, openrail++: ship the licence and its use restrictions in `licenses/`).
+SDXL-Lightning 8-step LoRA (394 MB, openrail++: ship the licence and its use restrictions in `licenses/`). **Motion library is bundled**
+(M10): `motions/` = the Kimodo-made starter set, the CMU and 100STYLE 2D catalogs and `motions/CREDITS.md`
+(copied to `licenses/`), plus the kimodo package (Apache-2.0) and hydra-core, omegaconf, scipy, bvhio
+(permissive). The Kimodo and Llama weights are downloaded on demand (`motion`, `motion_text` packs).
 
 When a new model is used, add a row here in the same commit.

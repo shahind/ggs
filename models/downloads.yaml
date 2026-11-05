@@ -57,3 +57,29 @@ packs:
       - repo: Qwen/Qwen3-VL-2B-Instruct
         dir: Qwen3-VL-2B-Instruct
         include: ["*.json", "*.safetensors", "*.txt", "*.jinja"]
+  motion:
+    label: Motion model (NVIDIA Kimodo)
+    why: Makes new animations; on its own it varies the library's motions (new takes, other lengths).
+    required: false
+    size_gb: 1.06
+    ready_when: {motion: [kimodo-soma]}
+    parts:
+      - repo: nvidia/Kimodo-SOMA-RP-v1.2
+        dir: Kimodo-SOMA-RP-v1.2
+        include: ["*"]
+  motion_text:
+    label: Motion text reader (Llama 3 8B + LLM2Vec)
+    why: Lets you describe any new animation in words. Needs 16 GB of system memory.
+    required: false
+    size_gb: 15.3
+    ready_when: {motion_text: [kimodo-soma]}
+    parts:
+      - repo: NousResearch/Meta-Llama-3-8B-Instruct
+        dir: Meta-Llama-3-8B-Instruct
+        include: ["*.json", "*.safetensors"]
+      - repo: McGill-NLP/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp
+        dir: LLM2Vec-Meta-Llama-3-8B-Instruct-mntp
+        include: ["*.json", "*.safetensors"]
+      - repo: McGill-NLP/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised
+        dir: LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised
+        include: ["*.json", "*.safetensors"]

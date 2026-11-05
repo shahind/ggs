@@ -181,7 +181,10 @@ def retarget(
     up = np.zeros(3)
     up[_AXES[up_axis]] = 1.0
 
-    height = float(rest[:, _AXES[up_axis]].max() - rest[:, _AXES[up_axis]].min())
+    # Height and ground come from the joints the profile maps: files can carry helper joints far from the body
+    # (Kimodo's BVH has a "Root" joint on the floor ~1 m below the feet).
+    used = [motion.index(j) for j in needed]
+    height = float(rest[used, _AXES[up_axis]].max() - rest[used, _AXES[up_axis]].min())
     if height <= 1e-9:
         raise RetargetError(f"{motion.source}: rest pose has zero height along {up_axis!r}")
 
@@ -216,7 +219,7 @@ def retarget(
 
     root_joint = mapping[spec.bones[[b.parent for b in spec.bones].index(None)].name][0]
     origin_x = float(jpos(root_joint)[0] @ X)
-    ground = float((P @ up).min())
+    ground = float((P[:, used] @ up).min())
 
     sx = (P @ X - origin_x) / height  # (F, J)
     sy = -(P @ up - ground) / height

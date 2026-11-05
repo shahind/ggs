@@ -86,10 +86,21 @@ class MattingSpec(BaseModel):
     path: list[str]
 
 
+class MotionSpec(BaseModel):
+    """Text-to-motion: the motion model, and the text encoder (base LLM + LLM2Vec adapters) it reads prompts with."""
+
+    registry: str
+    model: list[str]
+    text_encoder: list[str]
+    mntp: list[str]
+    supervised: list[str]
+
+
 class PipelinesFile(BaseModel):
     pipelines: dict[str, PipelineSpec]
     matting: dict[str, MattingSpec] = Field(default_factory=dict)
     captioning: dict[str, MattingSpec] = Field(default_factory=dict)  # same shape: registry id + paths
+    motion: dict[str, MotionSpec] = Field(default_factory=dict)
 
 
 def load_pipelines(path: Path | None = None) -> PipelinesFile:
@@ -164,3 +175,24 @@ def resolve_matting(name: str, dirs: list[Path] | None = None, spec_file: Pipeli
     if name not in spec_file.matting:
         raise ValueError(f"unknown matting model {name!r}; known: {sorted(spec_file.matting)}")
     return resolve(spec_file.matting[name].path, dirs or model_dirs(), f"matting {name}")
+
+
+def _motion_spec(name: str, spec_file: PipelinesFile | None) -> MotionSpec:
+    spec_file = spec_file or load_pipelines()
+    if name not in spec_file.motion:
+        raise ValueError(f"unknown motion model {name!r}; known: {sorted(spec_file.motion)}")
+    return spec_file.motion[name]
+
+
+def resolve_motion(name: str, dirs: list[Path] | None = None, spec_file: PipelinesFile | None = None) -> Path:
+    """Folder of the motion model (config.yaml + model.safetensors)."""
+    return resolve(_motion_spec(name, spec_file).model, dirs or model_dirs(), f"motion model {name}")
+
+
+def resolve_motion_text(name: str, dirs: list[Path] | None = None,
+                        spec_file: PipelinesFile | None = None) -> dict[str, Path]:
+    """Folders of the motion model's text encoder: base LLM, LLM2Vec MNTP adapter, supervised adapter."""
+    spec, dirs = _motion_spec(name, spec_file), dirs or model_dirs()
+    return {"base": resolve(spec.text_encoder, dirs, f"{name} text encoder"),
+            "mntp": resolve(spec.mntp, dirs, f"{name} text encoder adapter (mntp)"),
+            "supervised": resolve(spec.supervised, dirs, f"{name} text encoder adapter (supervised)")}

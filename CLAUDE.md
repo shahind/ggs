@@ -72,6 +72,7 @@ src/ggs/             package (cli.py, hardware.py, generate.py, recipes.py, rig/
 recipes/             asset-class presets (YAML), e.g. sprite.yaml, held_item.yaml
 clips/               keyframed clips (holds, swings) for `ggs clip keys`
 models/pipelines.yaml where each pipeline's files are found on disk, per profile
+motions/             animation library: starter set (Kimodo), catalogs/*.zip (CMU, 100STYLE), CREDITS.md
 tests/               pytest
 .claude/agents/      specialist subagents
 .claude/skills/      repeatable procedures
@@ -114,6 +115,10 @@ python -m ggs models status; python -m ggs models fetch required   # first-run m
 .venv\Scripts\python tools\build_app.py   # standalone app folder dist/GGS (portable Python + CUDA torch, no models)
 ISCC tools\installer.iss                   # -> dist/GGS-Setup-<ver>.exe (+ .bin slices), per-user install
 python -m ggs export cycle.json --character chars/pa/character.yaml --format apng --out walk.png  # or webp|gif|sheet|rig
+python -m ggs motion make --prompt "A person waves." --seconds 2 --count 2 --out clips/wave.json   # Kimodo text->clip
+python -m ggs motion catalog walk angry; python -m ggs motion add walk cmu/02_01 100style/Angry_FW --project <dir>
+python tools/make_motion_catalogs.py cmu --src data/mocap/src/cmu-mocap.zip --index data/mocap/src/cmu-index.txt
+python tools/make_motion_library.py   # starter set (motions/clips) with Kimodo; tools/install_kimodo.py installs it
 python -m ggs export cycle.json --character chars/pa/character.yaml --format godot --out build/hero  # or unity|defold
 ```
 

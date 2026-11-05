@@ -32,6 +32,9 @@ gpu = [
   "kornia",   # BiRefNet remote code
   "timm",     # BiRefNet remote code
 ]
+# Text to motion (M10): NVIDIA Kimodo's own dependencies; the kimodo package itself is installed by
+# tools/install_kimodo.py (its setup.py wants CMake for an optional C++ extension GGS does not use).
+motion = ["hydra-core>=1.3", "omegaconf>=2.3", "scipy>=1.10", "einops>=0.7", "bvhio"]
 dev = ["pytest>=8", "ruff>=0.5"]
 
 [project.scripts]

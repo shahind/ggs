@@ -48,3 +48,14 @@ captioning:
   qwen3-vl-2b:
     registry: qwen3-vl-2b
     path: [Qwen3-VL-2B-Instruct]
+
+# Text-to-motion (M10). The motion model alone can redo the starter library's motions (their text embeddings
+# ship in motions/embeds); new text needs the text encoder: Llama-3-8B-Instruct (the ungated NousResearch
+# copy of Meta's weights) + McGill's LLM2Vec adapters, streamed onto the GPU block by block.
+motion:
+  kimodo-soma:
+    registry: kimodo-soma
+    model: [Kimodo-SOMA-RP-v1.2]
+    text_encoder: [Meta-Llama-3-8B-Instruct]
+    mntp: [LLM2Vec-Meta-Llama-3-8B-Instruct-mntp]
+    supervised: [LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised]

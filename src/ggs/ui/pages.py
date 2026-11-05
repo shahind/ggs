@@ -420,9 +420,10 @@ class AnimatePage(QWidget):
         self.clip.clear()
         if p and C.clips_dir(p).exists():
             for c in sorted(C.clips_dir(p).glob("*.json")):
-                self.clip.addItem(c.stem, c)
+                if not c.name.endswith(".motion.json"):  # sidecars of library / generated motions
+                    self.clip.addItem(c.stem, c)
         if self.clip.count() == 0:
-            self.clip.addItem("(no clips yet: import a BVH, e.g. data/mocap/cmu/02_01_walk.bvh)", None)
+            self.clip.addItem("(no animations yet: add some in Animations > Library)", None)
         self.upper.clear()
         self.upper.addItem("(none: the motion's own arms)", None)
         for k in sorted((repo_root() / "clips").glob("*.yaml")):

@@ -31,6 +31,7 @@ from ggs.ui.workspace import CharacterWorkspace, ItemWorkspace, Placeholder
 MODEL_LABELS = {"flux2-klein-4b": "FLUX.2 klein - best quality", "sdxl": "SDXL - faster style training"}
 ROLE_DIR = 256
 ROLE_NODE = 257
+ROLE_CLIP = 258
 
 
 def _pipelines() -> list[str]:
@@ -132,6 +133,12 @@ class ProjectView(QWidget):
         chars, assets, anims, styles = (sections[k] for k in ("characters", "assets", "animations", "styles"))
         for s in _styles(self.project):
             QTreeWidgetItem(styles, [s]).setData(0, ROLE_NODE, "styles")
+        from ggs.ui.animations import _project_clips
+
+        for c in _project_clips(self.project):
+            it = QTreeWidgetItem(anims, [c.stem])
+            it.setData(0, ROLE_NODE, "animations")
+            it.setData(0, ROLE_CLIP, str(c))
         groups = {}
         target = None
         for rec, d in list_items(self.project):
@@ -177,7 +184,11 @@ class ProjectView(QWidget):
             self._open_item(Path(d))
             return
         node = it.data(0, ROLE_NODE)
-        self.stack.setCurrentWidget(self._section(node))
+        w = self._section(node)
+        self.stack.setCurrentWidget(w)
+        clip = it.data(0, ROLE_CLIP)
+        if clip and hasattr(w, "show_clip"):
+            w.show_clip(Path(clip))
 
     def _open_item(self, d: Path) -> None:
         key = str(d)
@@ -192,6 +203,11 @@ class ProjectView(QWidget):
             self.stack.addWidget(w)
         self.stack.setCurrentWidget(self.cache[key])
 
+    def _anims_changed(self) -> None:
+        self.tree.blockSignals(True)
+        self.refresh()
+        self.tree.blockSignals(False)
+
     def _item_changed(self, d: Path) -> None:
         self.tree.blockSignals(True)
         self.refresh(select=d)
@@ -200,7 +216,7 @@ class ProjectView(QWidget):
     def _section(self, node: str) -> QWidget:
         if node in self.cache:
             return self.cache[node]
-        from ggs.ui.pages import AnimatePage, AppState, StylesPage
+        from ggs.ui.pages import AppState, StylesPage
 
         state = AppState(self.queue)
         state.project = self.project
@@ -209,7 +225,15 @@ class ProjectView(QWidget):
             self.cache[node] = ph
             self.stack.addWidget(ph)
             return ph
-        page = {"animations": AnimatePage, "styles": StylesPage}.get(node)
+        if node == "animations":
+            from ggs.ui.animations import AnimationsPage
+
+            w = AnimationsPage(self.queue, self.project, state)
+            w.changed.connect(self._anims_changed)
+            self.cache[node] = w
+            self.stack.addWidget(w)
+            return w
+        page = {"styles": StylesPage}.get(node)
         w = page(state) if page else self.welcome
         if page:
             self.cache[node] = w

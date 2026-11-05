@@ -184,7 +184,7 @@ def test_missing_joints_reported(spec):
 
 def test_unknown_profile(spec):
     with pytest.raises(RetargetError, match="available"):
-        retarget(parse_bvh(walk_bvh(frames=4)), spec, "soma")
+        retarget(parse_bvh(walk_bvh(frames=4)), spec, "no_such_profile")
 
 
 def test_zero_length_bone_rejected(spec):

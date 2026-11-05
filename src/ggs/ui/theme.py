@@ -46,4 +46,9 @@ QScrollBar::handle:vertical {{ background: {LINE}; border-radius: 4px; min-heigh
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
 QToolTip {{ background: {CARD}; color: {TEXT}; border: 1px solid {LINE}; }}
 QCheckBox::indicator {{ width: 16px; height: 16px; }}
+QTabWidget::pane {{ border: none; top: 4px; }}
+QTabBar::tab {{ background: {CARD}; border: 1px solid {LINE}; border-radius: 8px; padding: 6px 14px;
+    margin-right: 6px; color: {MUTED}; }}
+QTabBar::tab:selected {{ background: #313552; border-color: {ACCENT}; color: {TEXT}; }}
+QTabBar::tab:hover {{ color: {TEXT}; }}
 """

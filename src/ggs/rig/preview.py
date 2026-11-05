@@ -41,16 +41,20 @@ def _draw(spec: RigSpec, clip: Clip, frame: int, cell: int):
 
 
 def render_preview(
-    spec: RigSpec, clip: Clip, out: str | Path, frames: int = 8, cell: int = 160
+    spec: RigSpec, clip: Clip, out: str | Path, frames: int = 8, cell: int = 160, max_frames: int | None = None
 ) -> Path:
-    """``.gif`` -> animated GIF of every frame; anything else -> PNG strip of ``frames`` evenly spaced frames."""
+    """``.gif`` -> animated GIF of every frame (every k-th when the clip is longer than ``max_frames``, at the
+    same speed); anything else -> PNG strip of ``frames`` evenly spaced frames."""
+    import math
+
     from PIL import Image
 
     out = Path(out)
     if out.suffix.lower() == ".gif":
-        imgs = [_draw(spec, clip, i, cell).convert("RGB") for i in range(clip.frame_count)]
+        step = max(1, math.ceil(clip.frame_count / max_frames)) if max_frames else 1
+        imgs = [_draw(spec, clip, i, cell).convert("RGB") for i in range(0, clip.frame_count, step)]
         imgs[0].save(
-            out, save_all=True, append_images=imgs[1:], duration=round(1000 / clip.fps), loop=0
+            out, save_all=True, append_images=imgs[1:], duration=round(1000 * step / clip.fps), loop=0
         )
         return out
     k = max(1, min(frames, clip.frame_count))
