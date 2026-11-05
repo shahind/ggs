@@ -39,6 +39,7 @@ class CharacterSpec(BaseModel):
     pivots: dict[str, tuple[float, float]] = Field(default_factory=dict)  # part name -> cell fraction
     stature: float = Field(1.0, gt=0, le=10)  # in-game height relative to other characters (export height x this)
     draw_order: list[str] | None = None  # back to front; None = the rig's (a skirt puts the legs behind the body)
+    layout: dict | None = None  # ggs.rig.layout.Layout: neck, trunk, hands, extras (None = the plain rig)
 
 
 class Character:
@@ -68,6 +69,20 @@ class Character:
         from PIL import Image
 
         return Image.open(self.sheet_path).convert("RGBA")
+
+    def rig(self) -> RigSpec:
+        """The character's rig: its base rig with its body layout (extra bones and parts)."""
+        from ggs.rig.layout import rig_for
+
+        return rig_for(self.spec.rig, self.spec.layout)
+
+    def clip(self, clip):
+        """``clip`` with tracks for every bone of the character's layout (chest, neck, skirt, hair, cape)."""
+        if not self.spec.layout:
+            return clip
+        from ggs.rig.layout import expand_clip
+
+        return expand_clip(clip, self.rig(), self.spec.layout)
 
     def puppet(self, rig: RigSpec, items: list | None = None) -> Puppet:
         """The character's puppet; ``items`` (``ggs.rig.equipment.Item``) are held at their sockets."""

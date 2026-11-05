@@ -123,7 +123,7 @@ def validate_character(character, rig: RigSpec, master: np.ndarray, spec: Master
         checks.append(Check(f"connected:{p.name}", frac >= lim.min_largest_piece, frac, lim.min_largest_piece,
                             f"{p.name}: largest piece holds {frac:.0%} of its pixels"))
         bone = rig.bone(p.bone)
-        if bone.parent is None:
+        if bone.parent is None or p.bone in ("skirt", "hair_back", "cape"):  # loose parts hang inside their parent
             continue
         cp = cut.parts[p.name]
         par_cut = next((q for q in cut.parts.values() if q.part.bone == bone.parent), None)
@@ -158,8 +158,14 @@ def validate_character(character, rig: RigSpec, master: np.ndarray, spec: Master
         tests, base = FRONT_TEST_POSES, FRONT_REST
     else:
         tests, base = TEST_POSES, MASTER_POSE
+    rest = master_angles(spec, rig)
     for name, overrides in tests.items():
-        angles = {**base, **overrides}
+        angles = {**rest, **base, **overrides}
+        names = {b.name for b in rig.bones}
+        if "chest" in names and "torso" in overrides:  # a layout's chest and neck follow the trunk and head
+            angles["chest"] = overrides["torso"]
+        if "neck" in names:
+            angles["neck"] = angles.get("chest", angles["torso"]) * 0.5 + angles["head"] * 0.5
         im = puppet.render_frame(pose_clip(rig, angles, lengths, name), 0, spec.height_px, size, spec.origin)
         on = np.asarray(im)[..., 3] >= 128
         sizes = component_sizes(on)

@@ -25,7 +25,12 @@ class AnimateDiffFrames:
                  stages: Stages) -> list:
         """One RGB frame per OpenPose image in ``poses`` (at most 16 per call)."""
         import torch
-        from diffusers import AnimateDiffControlNetPipeline, ControlNetModel, DDIMScheduler, MotionAdapter
+        from diffusers import (
+            AnimateDiffControlNetPipeline,
+            ControlNetModel,
+            DDIMScheduler,
+            MotionAdapter,
+        )
         from transformers import CLIPVisionModelWithProjection
 
         if not 1 <= len(poses) <= 16:

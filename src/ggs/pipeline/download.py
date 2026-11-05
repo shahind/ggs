@@ -66,11 +66,11 @@ def pack_ready(pack: Pack) -> bool:
         MissingModelError,
         load_pipelines,
         resolve_captioner,
+        resolve_frames,
         resolve_matting,
         resolve_motion,
         resolve_motion_text,
         resolve_pipeline,
-        resolve_frames,
         resolve_pose,
     )
 

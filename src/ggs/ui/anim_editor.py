@@ -57,6 +57,9 @@ class WarpRenderer:
         self.rig = self.skin.rig
         self.scale = PREVIEW_HEIGHT / self.skin.height_px
 
+    def prepare(self, clip):
+        return self.skin.prepare(clip)
+
     def layout(self, clip) -> tuple[tuple[int, int], tuple[float, float]]:
         lo, hi = np.array([np.inf, np.inf]), np.array([-np.inf, -np.inf])
         step = max(1, clip.frame_count // 40)
@@ -97,14 +100,15 @@ class PuppetRenderer:
     joints_editable = False
 
     def __init__(self, character_yaml: Path):
-        from ggs.paths import rigs_dir
-        from ggs.rig import load_rig_spec
         from ggs.rig.character import load_character
 
         self.character = load_character(character_yaml)
-        self.rig = load_rig_spec(rigs_dir() / f"{self.character.spec.rig}.yaml")
+        self.rig = self.character.rig()
         self.puppet = self.character.puppet(self.rig)
         self.lengths = dict(self.character.spec.bone_lengths)
+
+    def prepare(self, clip):
+        return self.character.clip(clip)
 
     def _pose(self, clip, f: int):
         from ggs.rig.pose import bone_defs, pose_bones, root_scale
@@ -310,6 +314,8 @@ class AnimEditor(QWidget):
             self._show()
 
     def set_clip(self, clip, name: str, save_dir: Path | None) -> None:
+        if self.renderer is not None and clip is not None:
+            clip = self.renderer.prepare(clip)  # tracks for the layout's extra bones
         self.clip, self.clip_name, self.save_dir = clip, name, save_dir
         self.cache.clear()
         if self.renderer is not None and clip is not None:

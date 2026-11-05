@@ -256,8 +256,7 @@ def preview_gif(character_yaml: Path, clip_path: Path, height: int = 230, second
     import hashlib
 
     from ggs.export.animated import save_gif
-    from ggs.paths import rigs_dir, shared_dir
-    from ggs.rig import load_rig_spec
+    from ggs.paths import shared_dir
     from ggs.rig.character import load_character
     from ggs.rig.clip import load_clip
 
@@ -274,8 +273,10 @@ def preview_gif(character_yaml: Path, clip_path: Path, height: int = 230, second
         skin = load_skin(character_yaml)
     else:
         ch = load_character(character_yaml)
-        spec = load_rig_spec(rigs_dir() / f"{ch.spec.rig}.yaml")
+        spec = ch.rig()
     clip = load_clip(clip_path)
+    if not warp:
+        clip = ch.clip(clip)
     n = min(clip.frame_count, max(1, int(seconds * clip.fps)))
     if n < clip.frame_count:
         cut = {k: v[:n] for k, v in clip.angles.items()}

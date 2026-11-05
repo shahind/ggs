@@ -60,15 +60,20 @@ def legs_behind(order: list[str]) -> list[str]:
     return legs + [b for b in order if b not in legs]
 
 
+LOOSE = ("skirt", "hair_back", "cape")
+
+
 def layer_bones(rig: RigSpec) -> list[tuple[str, list[str]]]:
     """(layer name, bones) for the side rig: far limbs, body, near limbs (rig draw order decides the order)."""
     from ggs.rig.retarget import limb_groups
 
     groups = limb_groups(rig)
-    taken = {b for g in groups for b in (*g.near, *g.far)}
+    extras = [b.name for b in rig.bones if b.name in LOOSE]
+    taken = {b for g in groups for b in (*g.near, *g.far)} | set(extras)
     out = [("body", [b.name for b in rig.bones if b.name not in taken])]
     for g in groups:
         out += [(f"{g.name}_far", list(g.far)), (f"{g.name}_near", list(g.near))]
+    out += [(x, [x]) for x in extras]  # skirt, back hair, cape: their own layers, they bend on their own
     return out
 
 
@@ -105,10 +110,12 @@ class SkinRig:
         self.parent = {b.name: b.parent for b in rig.bones}
         self.size = (image.shape[1], image.shape[0])
         self._mips: dict[int, dict[float, np.ndarray]] = {}
+        self._expanded: dict[int, tuple] = {}
+        self.layout: dict | None = None  # the character's body layout (set by the loader)
         from ggs.rig.joints import cloth_share
 
         # a skirt or long coat hangs over the legs: draw both legs behind the body (and fill their tops under it)
-        self.skirt = cloth_share(labels, rig, joints, widths) >= SKIRT_SHARE
+        self.skirt = "skirt" in self.bones or cloth_share(labels, rig, joints, widths) >= SKIRT_SHARE
         self.draw_order = self._base_order()
         order = {n: k for k, n in enumerate(self.draw_order)}
         rgba = image.astype(np.float32) / 255.0
@@ -156,7 +163,8 @@ class SkinRig:
         root = next(b for b in bones if self.parent[b] not in bones)
         if self.parent[root] is not None:
             out.append(self.parent[root])
-        if self.skirt and self.parent[root] is None:  # the skirt (body layer) sways with the thighs
+        skirt_layer = bones == ["skirt"] or (self.parent[root] is None and "skirt" not in self.bones)
+        if self.skirt and skirt_layer:  # the skirt sways with the thighs too
             out += [b for b in self.bones if b.startswith("thigh")]
         return out
 
@@ -221,12 +229,25 @@ class SkinRig:
         """Bone lengths of the drawing, in standing heights (what the clip is played with)."""
         return {b: max(math.dist(*self.joints[b]), 1e-3) / self.height_px for b in self.bones}
 
+    def prepare(self, clip):
+        """``clip`` with tracks for every bone of this rig (a layout's chest, neck, skirt, hair, cape)."""
+        if all(b in clip.angles for b in self.bones) and not (self.layout and self.layout.get("hands") ==
+                                                                  "with_forearm"):
+            return clip
+        key = id(clip)
+        if key not in self._expanded:
+            from ggs.rig.layout import expand_clip
+
+            self._expanded[key] = (clip, expand_clip(clip, self.rig, self.layout))
+        return self._expanded[key][1]
+
     def pose(self, clip, frame: int, in_place: bool = True) -> tuple[np.ndarray, np.ndarray]:
         """(start points, angles) of every bone at ``frame``, in drawing pixels (root at the origin)."""
         from ggs.rig.pose import bone_defs, pose_bones, root_scale
 
         bones = bone_defs(self.rig)
         lengths = self.lengths()
+        clip = self.prepare(clip)
         p = pose_bones(bones, clip, frame, lengths, root_scale(bones, clip, lengths), in_place)
         s = np.array([p[b][0] for b in self.bones], np.float32) * self.height_px
         e = np.array([p[b][1] for b in self.bones], np.float32) * self.height_px
@@ -336,7 +357,8 @@ class SkinRig:
         out.mkdir(parents=True, exist_ok=True)
         (image or Image.fromarray(self.source, "RGBA")).save(out / "skin.png")
         data = {"format": "ggs.skin", "version": 1, "rig": self.rig.id, "image": "skin.png",
-                "height_px": self.height_px, "joints": self.joints, "widths": self.widths, "grid": self.grid}
+                "height_px": self.height_px, "joints": self.joints, "widths": self.widths, "grid": self.grid,
+                "layout": self.layout}
         (out / "skin.json").write_text(json.dumps(data, indent=1), encoding="utf-8")
         return out / "skin.json"
 
@@ -457,8 +479,18 @@ def drawing_labels(rgba: np.ndarray, rig: RigSpec, joints: Joints, widths: dict[
     return region_labels(labels, rgba, rig, joints)
 
 
+def v1_joints(joints: Joints) -> Joints:
+    """A layout's joints folded back onto the plain rig: waist + chest = torso, neck + head = head."""
+    j = {b: v for b, v in joints.items() if b not in ("chest", "neck", *LOOSE)}
+    if "chest" in joints:
+        j["torso"] = (joints["torso"][0], joints["chest"][1])
+    if "neck" in joints:
+        j["head"] = (joints["neck"][0], joints["head"][1])
+    return j
+
+
 def build_skin(rig: RigSpec, image, joints: Joints, widths: dict[str, float], height_px: float,
-               max_height: float | None = 640.0, grid: float = GRID) -> SkinRig:
+               max_height: float | None = 640.0, grid: float = GRID, layout: dict | None = None) -> SkinRig:
     """A SkinRig from a drawing (PIL RGBA). Large drawings are scaled to ``max_height`` px per standing height
     first (frames are made at game sizes; this keeps building and rendering quick)."""
     from PIL import Image
@@ -470,6 +502,25 @@ def build_skin(rig: RigSpec, image, joints: Joints, widths: dict[str, float], he
         widths = {b: w * k for b, w in widths.items()}
         height_px *= k
     arr = np.asarray(image.convert("RGBA"))
+    if layout:  # label with the plain rig, then map through the layout (splits, skirt, hair, cape)
+        from ggs.rig.layout import Layout, apply_layout, rig_for
+
+        base = rig_for(rig.id, None)
+        j1 = v1_joints(joints)
+        w1 = {b: widths[b] for b in j1}
+        labels1 = drawing_labels(arr, base, j1, w1, height_px)
+        rig, joints2, widths2, labels, lay = apply_layout(labels1, base, Layout(**layout), j1, w1, height_px)
+        saved = Layout(**layout)
+        if saved.anchors:  # a saved rig: its own joints and anchors win over the recomputed ones
+            rig = rig_for(rig.id, saved)
+            joints = {**joints2, **{b: joints[b] for b in joints if b in LOOSE}}
+            widths = {**widths2, **{b: widths[b] for b in widths if b in LOOSE}}
+            lay = saved
+        else:
+            joints, widths = joints2, widths2
+        skin = SkinRig(rig, arr, joints, labels, widths, height_px, grid)
+        skin.layout = lay.model_dump()
+        return skin
     labels = drawing_labels(arr, rig, joints, widths, height_px)
     return SkinRig(rig, arr, joints, labels, widths, height_px, grid)
 
@@ -488,4 +539,4 @@ def load_skin(path: str | Path, rig: RigSpec | None = None) -> SkinRig:
     joints = {b: (tuple(s), tuple(e)) for b, (s, e) in data["joints"].items()}
     image = Image.open(path.parent / data["image"]).convert("RGBA")
     return build_skin(rig, image, joints, data["widths"], data["height_px"], max_height=None,
-                      grid=data.get("grid", GRID))
+                      grid=data.get("grid", GRID), layout=data.get("layout"))

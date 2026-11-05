@@ -144,9 +144,78 @@ def fit_masters(masters: list[Path], rig, model: str, stages) -> bool:
     return True
 
 
-def make_slices(project: Path, ref: str, template: str, *, seeds: list[int] | None = None, profile: str = "lite",
-                enforce_vram: bool = True) -> SliceResult:
-    """Draw the item's accepted design in the template's pose, cut it, keep the first try that validates."""
+def rigdraw_dir(item_dir: Path) -> Path:
+    """The animation-ready drawing: the design drawn by GGS in its layout's capture pose (``master.json`` +
+    ``master.png`` + labels), shared by the sliced version and "Bend the drawing"."""
+    return Path(item_dir) / "rigdraw"
+
+
+def resolve_layout(layout, item_dir: Path, base, cs) -> tuple:
+    """(Layout, measures) for 'auto' (suggested from the design itself), a preset name or a Layout."""
+    from ggs.rig.layout import PRESETS, Layout, suggest
+
+    if isinstance(layout, Layout):
+        return layout, {}
+    if isinstance(layout, dict):
+        return Layout(**layout), {}
+    if layout in PRESETS:
+        return PRESETS[layout].model_copy(deep=True), {}
+    if layout != "auto":
+        raise ValueError(f"unknown layout {layout!r}; use auto or one of {sorted(PRESETS)}")
+    import numpy as np
+    from PIL import Image
+
+    from ggs.items import design_dir
+    from ggs.rig.skin import drawing_labels
+    from ggs.rig.warp import body_widths, design_skeleton
+
+    data, joints, height_px = design_skeleton(item_dir)
+    widths = body_widths(base, cs, joints, height_px)
+    arr = np.asarray(Image.open(design_dir(item_dir) / data["image"]).convert("RGBA"))
+    labels = drawing_labels(arr, base, joints, widths, height_px)
+    return suggest(labels, base, joints, widths, height_px, cs.body_preset)
+
+
+def layout_master(master_json: Path, base, layout) -> object:
+    """Apply ``layout`` to a fitted try: its joints, widths, labels and drawing order become the layout's. The
+    fitted plain-rig version is kept (``master_v1.json``, ``labels_v1.png``) so another layout can be applied
+    without drawing again. Returns the layout rig."""
+    import numpy as np
+    from PIL import Image
+
+    from ggs.rig.layout import apply_layout
+    from ggs.rig.master import bone_angle
+
+    path = Path(master_json)
+    v1, l1 = path.parent / "master_v1.json", path.parent / "labels_v1.png"
+    if not v1.exists():
+        shutil.copy2(path, v1)
+        shutil.copy2(path.parent / "guide_labels.png", l1)
+    data = json.loads(v1.read_text(encoding="utf-8"))
+    labels = np.asarray(Image.open(l1).convert("L")).astype(np.int16) - 1
+    joints = {b: (tuple(s), tuple(e)) for b, (s, e) in data["joints"].items()}
+    widths = (data.get("fit") or {}).get("widths")
+    if not widths:
+        from ggs.rig.joints import bone_widths
+
+        g = path.parent / "guide_labels_guide.png"
+        glabels = np.asarray(Image.open(g if g.exists() else l1).convert("L")).astype(np.int16) - 1
+        widths = bone_widths(glabels, base, joints)
+    rig, j, w, lab, lay = apply_layout(labels, base, layout, joints, widths, float(data["height_px"]))
+    Image.fromarray((lab + 1).astype(np.uint8), "L").save(path.parent / data.get("labels", "guide_labels.png"))
+    fit = dict(data.get("fit") or {})
+    fit.update({"layout": lay.model_dump(), "widths": w, "draw_order": None})
+    data.update({"joints": {b: [list(s), list(e)] for b, (s, e) in j.items()},
+                 "angles": {b: bone_angle(*j[b]) for b in j}, "fit": fit})
+    path.write_text(json.dumps(data, indent=1), encoding="utf-8")
+    return rig
+
+
+def make_slices(project: Path, ref: str, template: str = "side_simple", *, layout="auto",
+                seeds: list[int] | None = None, profile: str = "lite", enforce_vram: bool = True) -> SliceResult:
+    """Draw the item's accepted design in its layout's capture pose (side view) or the template's pose (front),
+    find the joints, cut every try with the layout's rig, keep the best. The best try is also kept as the
+    animation-ready drawing (``rigdraw/``)."""
     from PIL import Image
 
     from ggs.generate import build_backends, real_rgba
@@ -155,7 +224,8 @@ def make_slices(project: Path, ref: str, template: str, *, seeds: list[int] | No
     from ggs.pipeline.vram import Stages
     from ggs.recipes import load_recipe
     from ggs.rig.body import PRESETS, BodyShape
-    from ggs.rig.make import CHARACTER_TEXT, cut_master, guide_puppet, on_white, pose_reference
+    from ggs.rig.layout import capture_pose
+    from ggs.rig.make import CHARACTER_TEXT, guide_puppet, on_white, pose_reference
     from ggs.rig.master import render_guide, save_master
     from ggs.rig.poses import pose_angles, rig_for
 
@@ -172,8 +242,11 @@ def make_slices(project: Path, ref: str, template: str, *, seeds: list[int] | No
     model = drawing.get("model") or "flux2-klein-4b"
     view = template_view(t)
     rig = rig_for(view)
+    side = view == "side"
+    lay, measures = resolve_layout(layout, d, rig, cs) if side else (None, {})
     puppet, lengths = guide_puppet(rig, body)
-    guide = render_guide(rig, puppet, lengths, size=1024, angles=pose_angles(view, t.pose))
+    angles = capture_pose(lay) if side else pose_angles(view, t.pose)
+    guide = render_guide(rig, puppet, lengths, size=1024, angles=angles)
     who = "; ".join(info.get("text") or [rec.description])
     style, lora, weight = "", None, 1.0
     if drawing.get("style"):
@@ -182,7 +255,7 @@ def make_slices(project: Path, ref: str, template: str, *, seeds: list[int] | No
         meta, lora = resolve_style(drawing["style"], project)
         style, weight = f"{meta.trigger}, ", drawing.get("style_weight") or meta.recommended_weight
     seeds = seeds or [drawing["seed"] + i for i in range(3)]
-    view_words = "side view facing right" if view == "side" else "front view facing the viewer, symmetrical T-pose"
+    view_words = "side view facing right" if side else "front view facing the viewer, symmetrical T-pose"
     progress.start(f"slices:{model}", ["encode", "denoise", "matte", "joints", "cut"] +
                    (["denoise", "matte"] if t.refine else []))
     recipe = load_recipe("sprite")
@@ -208,19 +281,81 @@ def make_slices(project: Path, ref: str, template: str, *, seeds: list[int] | No
     work = out / "work"
     if work.exists():
         shutil.rmtree(work)
-    tries, best = [], None
     spec0 = guide.spec.model_copy(update={"body": body.model_dump(), "prompt": prompt, "model": model})
     masters = []
-    for sd, img, alpha in zip(seeds, images, alphas):
+    for sd, img, alpha in zip(seeds, images, alphas, strict=True):
         rgba, _, _ = real_rgba(img, alpha, recipe.post.alpha_low, recipe.post.alpha_high)
         folder = work / f"seed_{sd:06d}"
         masters.append((sd, folder, save_master(folder, spec0.model_copy(update={"seed": sd}),
                                                 Image.fromarray(rgba, "RGBA"), guide)))
         img.save(folder / "master_raw.png")
     fitted = fit_masters([m for _, _, m in masters], rig, model, stages)
+    if side and layout == "auto" and fitted:  # the drawing tells more than the design: suggest again from it
+        lay, measures = suggest_from_try(masters[0][2], rig, cs.body_preset)
+    return _cut_tries(project, rec, d, out, [(sd, folder, m) for sd, folder, m in masters], rig, lay, measures,
+                      t, fitted, stages, refine=(t.refine and can_refine), model=model, profile=profile,
+                      enforce_vram=enforce_vram)
+
+
+def suggest_from_try(master_json: Path, base, body_preset: str):
+    """The suggested layout from a fitted try (its plain-rig labels)."""
+    import numpy as np
+    from PIL import Image
+
+    from ggs.rig.layout import suggest
+
+    path = Path(master_json)
+    v1 = path.parent / "master_v1.json"
+    data = json.loads((v1 if v1.exists() else path).read_text(encoding="utf-8"))
+    lab = path.parent / ("labels_v1.png" if v1.exists() else "guide_labels.png")
+    labels = np.asarray(Image.open(lab).convert("L")).astype(np.int16) - 1
+    joints = {b: (tuple(s), tuple(e)) for b, (s, e) in data["joints"].items()}
+    return suggest(labels, base, joints, data["fit"]["widths"], data["height_px"], body_preset)
+
+
+def recut_slices(project: Path, ref: str, layout) -> SliceResult:
+    """Cut the tries already drawn again with another layout (no drawing: a few seconds per try)."""
+    from ggs.items import CharacterSettings, ItemError, load
+    from ggs.pipeline.vram import Stages
+    from ggs.rig.poses import rig_for
+
+    rec, d = load(Path(project), ref)
+    out = sliced_dir(d)
+    tries = sorted((out / "work").glob("seed_*/master.json"))
+    if not tries:
+        raise ItemError("no tries drawn yet: make the sliced version first")
+    info = sliced_info(d)
+    rig = rig_for("side")
+    from ggs.items import design_dir
+
+    drawing = json.loads((design_dir(d) / "design.json").read_text(encoding="utf-8"))["drawing"]
+    cs = CharacterSettings(**(drawing.get("character") or {}))
+    stages = Stages(enforce=False)
+    unfitted = [m for m in tries if not (json.loads(m.read_text(encoding="utf-8")).get("fit")
+                                         or (m.parent / "master_v1.json").exists())]
+    fitted = fit_masters(unfitted, rig, drawing.get("model") or "flux2-klein-4b", stages) if unfitted else True
+    if layout == "auto" and fitted:
+        lay, measures = suggest_from_try(tries[0], rig, cs.body_preset)
+    else:
+        lay, measures = resolve_layout(layout, d, rig, cs)
+    masters = [(int(m.parent.name.split("_")[1]), m.parent, m) for m in tries]
+    return _cut_tries(Path(project), rec, d, out, masters, rig, lay, measures,
+                      get_template(info.get("template", "side_simple")), bool(fitted), stages, refine=False)
+
+
+def _cut_tries(project, rec, d, out, masters, rig, lay, measures, t, fitted, stages, *, refine: bool,
+               model: str = "", profile: str = "lite", enforce_vram: bool = True) -> SliceResult:
+    from ggs.rig.make import cut_master
+
+    tries, best = [], None
+    cut_rig = rig
     with stages.stage("cut"):  # CPU: cut every try into pieces and check it (the longest part after drawing)
         for sd, folder, master in masters:
-            outcome = cut_master(master, rig, folder / "character", rec.name)
+            if lay is not None and fitted:
+                cut_rig = layout_master(master, rig, lay)
+            if (folder / "character").exists():
+                shutil.rmtree(folder / "character")
+            outcome = cut_master(master, cut_rig, folder / "character", rec.name)
             fails = [f"{c.name}: {c.detail}" for c in outcome.report.checks if not c.passed]
             tries.append({"seed": sd, "passed": outcome.report.passed, "score": round(outcome.report.score, 4),
                           "folder": str(folder), "failures": fails[:6], "cut": outcome.character is not None})
@@ -228,13 +363,13 @@ def make_slices(project: Path, ref: str, template: str, *, seeds: list[int] | No
                 best = folder / "character"
     rough = False
     if best is None:
-        usable = [t for t in tries if t["cut"] and t["score"] >= ROUGH_IOU]
+        usable = [x for x in tries if x["cut"] and x["score"] >= ROUGH_IOU]
         if usable:
-            best, rough = Path(max(usable, key=lambda t: t["score"])["folder"]) / "character", True
-    if best is not None and t.refine and can_refine:
+            best, rough = Path(max(usable, key=lambda x: x["score"])["folder"]) / "character", True
+    if best is not None and refine:
         from ggs.rig.refine import refine_characters
 
-        refine_characters([best], rig, model=model, profile=profile, enforce_vram=enforce_vram)
+        refine_characters([best], cut_rig, model=model, profile=profile, enforce_vram=enforce_vram)
     for f in out.glob("*"):  # replace the previous sliced version (the work folder stays)
         if f.name != "work":
             shutil.rmtree(f) if f.is_dir() else f.unlink()
@@ -242,9 +377,22 @@ def make_slices(project: Path, ref: str, template: str, *, seeds: list[int] | No
         for f in best.iterdir():
             if f.is_file():
                 shutil.copy2(f, out / f.name)
+    # the animation-ready drawing: the try that was cut best (else the first), for "Bend the drawing"
+    pick = best.parent if best is not None else (Path(max(tries, key=lambda x: x["score"])["folder"])
+                                                 if tries else None)
+    rd = rigdraw_dir(d)
+    if pick is not None and rig.view == "side":
+        if rd.exists():
+            shutil.rmtree(rd)
+        rd.mkdir(parents=True)
+        for f in pick.iterdir():
+            if f.is_file():
+                shutil.copy2(f, rd / f.name)
     (out / "slices.json").write_text(json.dumps({
         "format": "ggs.slices", "version": 1, "template": t.id, "rig": rig.id, "design": rec.accepted,
-        "passed": best is not None and not rough, "rough": rough, "tries": tries, "joints_fitted": fitted}, indent=1), encoding="utf-8")
+        "passed": best is not None and not rough, "rough": rough, "tries": tries, "joints_fitted": fitted,
+        "layout": lay.model_dump() if lay is not None else None, "measures": measures}, indent=1),
+        encoding="utf-8")
     return SliceResult(out / "character.yaml" if best is not None else None, tries, rough)
 
 
@@ -253,8 +401,6 @@ def pieces_preview(item_dir: Path) -> Path | None:
     small grid: ``sliced/pieces.png``, remade when the part sheet changes."""
     from PIL import Image
 
-    from ggs.paths import rigs_dir
-    from ggs.rig import load_rig_spec
 
     d = sliced_dir(item_dir)
     sheet, info = d / "parts.png", d / "character.yaml"
@@ -263,9 +409,10 @@ def pieces_preview(item_dir: Path) -> Path | None:
         return None
     if out.exists() and out.stat().st_mtime >= sheet.stat().st_mtime:
         return out
-    import yaml
 
-    rig = load_rig_spec(rigs_dir() / f"{(yaml.safe_load(info.read_text(encoding='utf-8')) or {})['rig']}.yaml")
+    from ggs.rig.character import load_character
+
+    rig = load_character(info).rig()
     ps = rig.part_sheet
     img = Image.open(sheet).convert("RGBA")
     c = img.width // ps.cols
@@ -284,16 +431,15 @@ def sync_head_variants(item_dir: Path) -> None:
     until expressions are drawn, so copy the new head into them."""
     from PIL import Image
 
-    from ggs.paths import rigs_dir
-    from ggs.rig import load_rig_spec
 
     d = sliced_dir(item_dir)
     sheet, info = d / "parts.png", d / "character.yaml"
     if not sheet.exists() or not info.exists():
         return
-    import yaml
 
-    rig = load_rig_spec(rigs_dir() / f"{(yaml.safe_load(info.read_text(encoding='utf-8')) or {})['rig']}.yaml")
+    from ggs.rig.character import load_character
+
+    rig = load_character(info).rig()
     ps = rig.part_sheet
     head = next((p for p in ps.parts if p.bone == "head"), None)
     if head is None or not ps.head_variants:

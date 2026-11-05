@@ -406,7 +406,7 @@ def _clean_parts(master: np.ndarray, labels: np.ndarray, spec: MasterSpec, rig: 
             raise CutError(f"part {p.name!r}: almost no master pixels were labelled with it")
         above = np.isin(labels, [index[n] for n in draw_order if order[n] > order[p.bone]])
         hidden = np.zeros(labels.shape, bool)
-        if p.bone_far is None:  # trunk parts: what the near limbs drawn above them hide, inside their outline
+        if p.bone in ("pelvis", "torso", "chest", "skirt"):  # the trunk: what the near limbs drawn above it hide
             hidden = convex_hull_mask(own) & above & on
         hidden &= ~own
         body = own | extra[p.bone]
@@ -502,7 +502,7 @@ def normalize(cut: CutResult, spec: MasterSpec, rig: RigSpec, margin_px: int = 6
 
 
 def write_character(sheet: SheetResult, rig: RigSpec, out_dir: str | Path, name: str, stature: float = 1.0,
-                    draw_order: list[str] | None = None) -> Path:
+                    draw_order: list[str] | None = None, layout: dict | None = None) -> Path:
     import yaml
 
     from ggs.rig.character import CharacterSpec
@@ -514,7 +514,7 @@ def write_character(sheet: SheetResult, rig: RigSpec, out_dir: str | Path, name:
         sheet.invented.save(out / "parts_filled.png")
     spec = CharacterSpec(name=name, rig=rig.id, sheet="parts.png", px_per_height=round(sheet.px_per_height, 3),
                          bone_lengths=sheet.bone_lengths, pivots=sheet.pivots, stature=stature,
-                         draw_order=draw_order)
+                         draw_order=draw_order, layout=layout)
     path = out / "character.yaml"
     path.write_text(yaml.safe_dump(spec.model_dump(), sort_keys=False), encoding="utf-8")
     return path

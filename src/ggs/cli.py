@@ -751,19 +751,30 @@ def cmd_character_slice(args: argparse.Namespace) -> int:
     from ggs.pipeline.models import MissingModelError
     from ggs.pipeline.vram import VramBudgetError
     from ggs.rig.cutter import CutError
-    from ggs.rig.slices import make_slices
+    from ggs.rig.layout import PRESETS, Layout
+    from ggs.rig.slices import make_slices, recut_slices
 
     profile = args.profile or profile_for(detect_vram_gb())
     seeds = [args.seed + i for i in range(args.count)] if args.seed is not None else None
+    layout = args.layout
+    if args.extras is not None:  # a preset with chosen loose parts
+        base = PRESETS.get(args.layout, PRESETS["standard"])
+        extras = [x for x in args.extras.split(",") if x and x != "none"]
+        layout = base.model_copy(update={"extras": extras})
+        Layout.model_validate(layout.model_dump())
     try:
-        res = make_slices(Path(args.project), args.item, args.template, seeds=seeds, profile=profile,
-                          enforce_vram=not args.no_vram_check)
+        if args.recut:
+            res = recut_slices(Path(args.project), args.item, layout)
+        else:
+            res = make_slices(Path(args.project), args.item, args.template, layout=layout, seeds=seeds,
+                              profile=profile, enforce_vram=not args.no_vram_check)
     except (ItemError, MissingModelError, VramBudgetError, CutError, ValueError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     except ImportError as exc:
         print(f'ERROR: {exc}. Install the GPU stack: see README ("gpu" extra).', file=sys.stderr)
         return 1
+    _print_layout(Path(args.project), args.item)
     for t in res.tries:
         state = "OK" if t["passed"] else "rejected: " + "; ".join(t["failures"][:2])
         print(f"try seed {t['seed']}: {state}")
@@ -779,6 +790,16 @@ def cmd_character_slice(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_layout(project: Path, item: str) -> None:
+    from ggs.items import load
+    from ggs.rig.layout import Layout
+    from ggs.rig.slices import sliced_info
+
+    info = sliced_info(load(project, item)[1])
+    if info.get("layout"):
+        print(f"layout: {Layout(**info['layout']).label()}  (measures: {info.get('measures') or {}})")
+
+
 def cmd_character_warp(args: argparse.Namespace) -> int:
     """Build the warp rig (bend the drawing) from the character's accepted design."""
     from ggs.items import ItemError
@@ -787,7 +808,7 @@ def cmd_character_warp(args: argparse.Namespace) -> int:
 
     try:
         out = make_design_warp(Path(args.project), args.item, args.detail, fit=not args.no_fit,
-                               stages=Stages(enforce=False))
+                               stages=Stages(enforce=False), source=args.source)
     except (ItemError, WarpError, ValueError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -1167,7 +1188,6 @@ def cmd_export(args: argparse.Namespace) -> int:
     from ggs.export.pack import PackError
     from ggs.export.rig_package import write_rig_package
     from ggs.export.sheet import save_sprite_sheet
-    from ggs.paths import rigs_dir
     from ggs.rig.character import load_character
     from ggs.rig.clip import load_clip
     from ggs.rig.puppet import RenderError
@@ -1178,7 +1198,7 @@ def cmd_export(args: argparse.Namespace) -> int:
         return _export_warp(args)
     try:
         character = load_character(args.character)
-        spec = load_rig_spec(args.rig or rigs_dir() / f"{character.spec.rig}.yaml")
+        spec = load_rig_spec(args.rig) if args.rig else character.rig()
         from ggs.rig.equipment import apply_two_hand, load_item
 
         items = [load_item(i) for i in args.item]
@@ -1187,6 +1207,7 @@ def cmd_export(args: argparse.Namespace) -> int:
             clip = load_clip(path)
             if clip.rig != spec.id:
                 raise ValueError(f"{Path(path).name} is for rig {clip.rig!r}; this character uses {spec.id!r}")
+            clip = character.clip(clip)  # tracks for the layout's extra bones
             for it in items:  # two-hand items: the far arm reaches the second grip (IK, every frame)
                 if it.spec.hold == "two_hand":
                     clip = apply_two_hand(clip, spec, character.spec.bone_lengths, it.spec)
@@ -1544,6 +1565,9 @@ def build_parser() -> argparse.ArgumentParser:
     cw.add_argument("--project", required=True)
     cw.add_argument("--detail", default="normal", choices=["coarse", "normal", "fine"], help="mesh subdivision")
     cw.add_argument("--no-fit", action="store_true", help="keep the design's skeleton (no joint finder)")
+    cw.add_argument("--source", default="auto", choices=["auto", "drawing", "design"],
+                    help="drawing: the animation-ready drawing (made with the sliced version); design: the design "
+                         "as it is; auto: the drawing when there is one")
     cw.set_defaults(func=cmd_character_warp)
     pa = char.add_parser("programmer-art", help="draw a placeholder part sheet + character.yaml")
     pa.add_argument("--out", required=True, help="output folder")
@@ -1612,7 +1636,12 @@ def build_parser() -> argparse.ArgumentParser:
                                        "pose and cut into parts (exit 2 if no try cuts cleanly)")
     csl.add_argument("item", help="character item name in the project")
     csl.add_argument("--project", required=True)
-    csl.add_argument("--template", default="side_simple", help="see rigs/slice_templates.yaml")
+    csl.add_argument("--template", default="side_simple", help="see rigs/slice_templates.yaml (front: front view)")
+    csl.add_argument("--layout", default="auto", choices=["auto", "chibi", "standard", "tall"],
+                     help="body layout (docs/BODY_LAYOUTS.md); auto = suggested from the drawing")
+    csl.add_argument("--extras", default=None,
+                     help="loose parts, comma separated: hair_back,skirt,cape (or none); default: suggested")
+    csl.add_argument("--recut", action="store_true", help="cut the tries already drawn again (no drawing)")
     csl.add_argument("--seed", type=int, default=None, help="first seed (default: the design's)")
     csl.add_argument("--count", type=int, default=3, help="tries; the first that cuts cleanly is kept")
     csl.add_argument("--profile", choices=["standard", "lite"], default=None)

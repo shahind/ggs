@@ -59,8 +59,21 @@ def body_widths(rig, cs, joints: dict, height_px: float) -> dict[str, float]:
     return {b: w * k for b, w in bone_widths(guide.labels, rig, guide.spec.joints).items()}
 
 
-def make_design_warp(project: Path, ref: str, detail: str = "normal", *, fit: bool = True, stages=None) -> Path:
-    """Build the warp rig of the item's accepted design and save it in ``<item>/warp/``."""
+def make_design_warp(project: Path, ref: str, detail: str = "normal", *, fit: bool = True, stages=None,
+                     source: str = "auto") -> Path:
+    """Build the warp rig and save it in ``<item>/warp/``. ``source``: ``drawing`` = the animation-ready drawing
+    (made with the sliced version, in the layout's capture pose, with the layout's loose parts), ``design`` = the
+    accepted design as it is (advanced: arms over the body bend less well), ``auto`` = the drawing when there is
+    one."""
+    from ggs.items import load as _load
+    from ggs.rig.slices import rigdraw_dir
+
+    _, d0 = _load(Path(project), ref)
+    rd = rigdraw_dir(d0) / "master.json"
+    if source == "drawing" or (source == "auto" and rd.exists()):
+        if not rd.exists():
+            raise WarpError("no animation-ready drawing yet: make the sliced version first")
+        return _warp_from_drawing(d0, rd, detail)
     from PIL import Image
 
     from ggs.items import CharacterSettings, design_dir, load
@@ -96,6 +109,26 @@ def make_design_warp(project: Path, ref: str, detail: str = "normal", *, fit: bo
     return out
 
 
+def _warp_from_drawing(d: Path, master_json: Path, detail: str) -> Path:
+    from PIL import Image
+
+    from ggs.rig.layout import rig_for
+    from ggs.rig.master import load_master
+
+    spec, master, _labels = load_master(master_json)
+    fit = spec.fit or {}
+    base = rig_for(spec.rig, None)
+    widths = fit.get("widths") or {}
+    layout = fit.get("layout")
+    skin = build_skin(base, Image.fromarray(master, "RGBA"), spec.joints, widths, spec.height_px,
+                      grid=DETAIL[detail], layout=layout)
+    out = skin.save(warp_dir(d))
+    (warp_dir(d) / "warp.json").write_text(json.dumps({
+        "format": "ggs.warp", "version": 1, "source": "drawing", "detail": detail, "layout": layout}, indent=1),
+        encoding="utf-8")
+    return out
+
+
 def move_joints(skin_json: Path, moved: dict[str, Point]) -> SkinRig:
     """Move joints of a saved rig (``moved``: joint name -> new position in rig pixels, where a joint is a bone's
     start, e.g. ``forearm_near`` = the near elbow, or ``<bone>:end`` for a chain's tip) and rebuild it."""
@@ -117,7 +150,10 @@ def move_joints(skin_json: Path, moved: dict[str, Point]) -> SkinRig:
             if q == p and b != bone and _close(skin.joints[b][0], skin.joints[bone][0]):
                 joints[b][0] = [x, y]
     new = {b: (tuple(s), tuple(e)) for b, (s, e) in joints.items()}
-    rebuilt = build_skin(skin.rig, _image(skin), new, skin.widths, skin.height_px, max_height=None, grid=skin.grid)
+    from ggs.rig.layout import rig_for
+
+    rebuilt = build_skin(rig_for(skin.rig.id, None) if skin.layout else skin.rig, _image(skin), new, skin.widths,
+                         skin.height_px, max_height=None, grid=skin.grid, layout=skin.layout)
     rebuilt.save(Path(skin_json).parent)
     return rebuilt
 
