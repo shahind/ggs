@@ -1,0 +1,14 @@
+# Recipe: vfx - a particle texture for additive blending (spark, glow, magic burst, flame). Drawn as light on black;
+# alpha = brightness (see src/ggs/assets/vfx.py for why this is not a chroma key).
+id: vfx
+kind: vfx
+description: Additive particle texture (glow, spark, magic, flame)
+base_model: flux2-klein-4b
+matting: birefnet
+size: [768, 768]
+background: "#000000"
+prompt_template: >-
+  {style}{description}, a single glowing particle effect texture for a game, centered, bright light on a pure black
+  background, fading softly to black well before the edges of the image, no objects, no text
+vfx: {max_edge: 0.08, export_px: 256}
+min_profile: lite

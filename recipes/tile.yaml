@@ -1,0 +1,14 @@
+# Recipe: tile - a seamless texture that repeats in x and y (floors, walls, terrain). Rolled by half a tile and the
+# middle seams repainted; QA measures the wrap seam. Opaque, no matting.
+id: tile
+kind: tile
+description: Seamless repeating texture (x and y)
+base_model: flux2-klein-4b
+matting: birefnet
+size: [1024, 1024]
+background: "#FFFFFF"
+prompt_template: >-
+  {style}seamless tileable texture of {description}, top-down view, evenly lit, the pattern fills the whole frame
+  edge to edge, no border, no frame, no single objects, no text
+tile: {seamless: xy, band: 0.14, max_seam: 0.995, export_px: 512}
+min_profile: lite

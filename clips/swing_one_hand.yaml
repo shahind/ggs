@@ -1,0 +1,13 @@
+# One-hand overhead swing: wind up over the head, strike forward and down, recover to the ready hold.
+format: ggs.keys
+version: 1
+name: swing_one_hand
+fps: 24
+frames: 16
+loop: false
+keys:
+  - {frame: 0,  angles: {upper_arm_near: -20,  forearm_near: -80,  hand_near: -80}}
+  - {frame: 4,  angles: {upper_arm_near: -165, forearm_near: -200, hand_near: -215}}
+  - {frame: 7,  angles: {upper_arm_near: -95,  forearm_near: -85,  hand_near: -75}}
+  - {frame: 9,  angles: {upper_arm_near: -40,  forearm_near: -20,  hand_near: -5}}
+  - {frame: 15, angles: {upper_arm_near: -20,  forearm_near: -80,  hand_near: -80}}

@@ -1,0 +1,35 @@
+# Recipe: held_item - an item a character holds (sword, axe, staff, gun), drawn standing straight up with
+# the handle at the bottom, so `ggs item make` can find the grip. Same pipeline and QA as sprite.
+# The generator paints on a flat, known background; the matting model gives real alpha; decontamination
+# removes the background colour from soft edges; QA checks before anything is written.
+id: held_item
+description: Item for a character's hand, upright, handle at the bottom
+base_model: flux2-klein-4b
+matting: birefnet
+size: [640, 1024]
+background: "#FFFFFF"
+prompt_template: >-
+  {style}{description}, a single game item standing straight up vertically, handle at the bottom and tip at the
+  top, flat side view, whole item fully in view and centered with empty space around it, clean readable
+  silhouette, crisp edges, plain flat pure white background, no hand, no ground, no shadow, no text
+prompt_templates:
+  sdxl: >-
+    {style}{description}, one single item standing upright, handle at the bottom, 2d flat illustration, centered,
+    isolated on pure white background, no shadow, clean bold outline, no text
+post:
+  alpha_low: 0.04
+  alpha_high: 0.96
+  padding: 4
+  power_of_two: false
+qa:
+  min_coverage: 0.01
+  max_coverage: 0.85
+  edge_margin_px: 2
+  max_background_spread: 12
+  fringe_distance: 40
+  halo_threshold: 0.25
+  max_halo: 0.10
+  max_leftover_background: 0.05
+  max_island_fraction: 0.002
+export: png
+min_profile: lite

@@ -1,0 +1,34 @@
+# Recipe: ui_icon - a game UI icon (inventory items, skills, buttons): a bold, simple sprite, same pipeline and QA.
+# The generator paints on a flat, known background; the matting model gives real alpha; decontamination
+# removes the background colour from soft edges; QA checks before anything is written.
+id: ui_icon
+description: Game UI icon, bold and simple, transparent background
+base_model: flux2-klein-4b
+matting: birefnet
+size: [768, 768]
+background: "#FFFFFF"
+prompt_template: >-
+  {style}game UI icon of {description}, a single detailed colourful object with highlights and shading, a clear
+  silhouette readable at small sizes, clean outline, centered with empty space around it, plain flat pure white
+  background, no frame, no ground, no shadow, no text
+prompt_templates:
+  sdxl: >-
+    {style}{description}, 2d flat illustration, one single object alone, centered, full view, isolated on pure
+    white background, flat white background, no shadow, clean bold outline, no text
+post:
+  alpha_low: 0.04
+  alpha_high: 0.96
+  padding: 4
+  power_of_two: false
+qa:
+  min_coverage: 0.01
+  max_coverage: 0.85
+  edge_margin_px: 2
+  max_background_spread: 12
+  fringe_distance: 40
+  halo_threshold: 0.25
+  max_halo: 0.10
+  max_leftover_background: 0.05
+  max_island_fraction: 0.002
+export: png
+min_profile: lite

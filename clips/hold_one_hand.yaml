@@ -1,0 +1,11 @@
+# One-hand ready hold: forearm forward, the held item points up and a little forward. Loops (a still pose), so
+# layered over a walk it lasts as long as the walk.
+format: ggs.keys
+version: 1
+name: hold_one_hand
+fps: 24
+frames: 2
+loop: true
+keys:
+  - {frame: 0, angles: {upper_arm_near: -20, forearm_near: -80, hand_near: -80,
+                        upper_arm_far: 15, forearm_far: -10, hand_far: -10}}

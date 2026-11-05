@@ -1,0 +1,16 @@
+# Recipe: ui_panel - a game UI panel or button with a decorative frame and a plain centre, exported with 9-slice
+# margins (Unity, Godot, Defold) and hover / pressed states.
+id: ui_panel
+kind: ui_panel
+description: UI panel or button, 9-slice margins, hover and pressed states
+base_model: flux2-klein-4b
+matting: birefnet
+size: [1024, 768]
+background: "#FFFFFF"
+prompt_template: >-
+  {style}{description}, a single empty rectangular game UI panel, front view, flat, a decorative frame around the
+  edges and a plain evenly coloured centre with nothing in it, centered with empty space around it, plain flat
+  pure white background, no text, no icons, no shadow
+panel: {min_border: 6, max_border: 0.42, centre_tolerance: 28, max_centre_spread: 22, states: true}
+post: {alpha_low: 0.04, alpha_high: 0.96, padding: 0, power_of_two: false}
+min_profile: lite

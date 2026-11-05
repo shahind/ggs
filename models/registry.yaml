@@ -1,0 +1,172 @@
+# Model / adapter / motion registry.
+# commercial: yes | no | verify
+#   yes    = permissive license confirmed from the source listed; may be bundled or default.
+#   no     = non-commercial or otherwise unusable for a commercial game; never default.
+#   verify = unclear or conflicting sources; license-auditor must resolve it before use.
+# Entries reflect research done on 2026-11-04. Re-check the license text itself before shipping anything.
+entries:
+  - id: flux2-klein-4b
+    kind: base
+    name: FLUX.2 klein 4B
+    license: Apache-2.0
+    commercial: "yes"
+    min_vram_gb: 3        # GGUF Q4 inference; bf16 needs more
+    source: https://huggingface.co/black-forest-labs/FLUX.2-klein-4B
+    notes: Generation + reference-image editing. LoRA training guide lists 12GB for the 4B base.
+      Lite profile uses unsloth/FLUX.2-klein-4B-GGUF (Q4_K_M, apache-2.0 per repo); text encoder is Qwen3-4B.
+
+  - id: flux2-klein-9b
+    kind: base
+    name: FLUX.2 klein 9B
+    license: FLUX Non-Commercial
+    commercial: "no"
+    min_vram_gb: 22
+    source: https://docs.us.bfl.ai/flux_2/flux2_klein_training
+    notes: Non-commercial. Do not enable by default.
+
+  - id: z-image-turbo
+    kind: base
+    name: Z-Image Turbo (6B)
+    license: Apache-2.0
+    commercial: "yes"
+    min_vram_gb: 6        # GGUF; fp8 ~8GB; bf16 14-16GB
+    source: https://www.thundercompute.com/blog/z-image-turbo-comfyui
+    notes: Good text rendering. Turbo is distilled; train LoRAs on Z-Image Base.
+
+  - id: z-image-base
+    kind: base
+    name: Z-Image Base (6B)
+    license: Apache-2.0
+    commercial: "yes"
+    min_vram_gb: 8
+    source: https://www.artifilog.com/posts/best-open-source-image-generation-models
+    notes: Undistilled; supports negative prompts and LoRA training. 8GB training only at 512px with offloading.
+
+  - id: qwen-image-2512
+    kind: base
+    name: Qwen-Image 2512
+    license: Apache-2.0
+    commercial: "yes"
+    min_vram_gb: 16
+    source: https://app.cinevva.com/guides/frontier-gen-ai-models
+    notes: Older Apache Qwen checkpoint. Edit variant Qwen-Image-Edit-2511 is used by sprite-sheet LoRAs.
+
+  - id: qwen-image-2.1
+    kind: base
+    name: Qwen-Image 2.1 (7B, native RGBA)
+    license: Qwen Research License
+    commercial: "no"
+    min_vram_gb: 16
+    source: https://www.eesel.ai/blog/qwen-image-2-1-review
+    notes: Native transparency, but license is non-commercial only. Do not use for a shipped game without a separate license.
+
+  - id: sdxl-base-1.0
+    kind: base
+    name: Stable Diffusion XL base 1.0
+    license: CreativeML Open RAIL++-M
+    commercial: "yes"
+    min_vram_gb: 6        # bf16 UNet 5.1 GB for inference; training on 8 GB stores the UNet Linears in fp8
+    source: https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0
+    notes: "Hub card says openrail++ and LICENSE.md is CreativeML Open RAIL++-M (checked 2026-11-03). Commercial
+      use is allowed, but the license's use restrictions (Attachment A) must be passed on to users, so the app
+      has to show or ship them. Style LoRAs trained here only load on SDXL."
+
+  - id: sdxl-vae-fp16-fix
+    kind: component   # part of a pipeline, not a model to pick
+    name: SDXL VAE fp16 fix (madebyollin)
+    license: MIT
+    commercial: "yes"
+    min_vram_gb: 1
+    source: https://huggingface.co/madebyollin/sdxl-vae-fp16-fix
+    notes: "Hub card says mit (checked 2026-11-03). Fine-tuned SDXL VAE that does not overflow in half precision."
+
+  - id: lora-sdxl-lightning-8step
+    kind: lora
+    name: SDXL-Lightning 8-step LoRA (ByteDance)
+    base: sdxl-base-1.0
+    license: CreativeML Open RAIL++-M
+    commercial: "yes"
+    source: https://huggingface.co/ByteDance/SDXL-Lightning
+    notes: "Hub card says openrail++ (checked 2026-11-03). Distillation LoRA: 8 steps, CFG off, trailing Euler
+      schedule. Loaded under the user's style LoRA for every SDXL generation when present."
+
+  - id: lora-pixel-art-klein4b
+    kind: lora
+    name: Limbicnation pixel-art sprite LoRA
+    base: flux2-klein-4b
+    license: Apache-2.0
+    commercial: "yes"
+    source: https://huggingface.co/Limbicnation/pixel-art-lora
+    notes: Trained on CC0 data per model card. Pixel-art character sprites.
+
+  - id: lora-spritesheet-klein4b
+    kind: lora
+    name: fal klein 4B 2x2 multi-angle sprite sheet LoRA
+    base: flux2-klein-4b
+    license: unknown
+    commercial: verify
+    source: https://huggingface.co/fal/flux-2-klein-4b-spritesheet-lora
+    notes: Edit LoRA (single object -> 4 angles). Check license on the original repo, not the mirror.
+
+  - id: lora-pixel-4walk-klein4b
+    kind: lora
+    name: svntax pixel 4-direction walk sheet LoRA
+    base: flux2-klein-4b
+    license: unknown
+    commercial: verify
+    source: https://hf-cn0.pages.dev/svntax-dev/pixel_spritesheet_4walk_small_lora_v1
+    notes: 32x32 pixel characters; works via text-to-image or edit with a reference.
+
+  - id: birefnet
+    kind: matting
+    name: BiRefNet (ZhengPeng7) dichotomous segmentation / background removal
+    license: MIT
+    commercial: "yes"
+    min_vram_gb: 2
+    source: https://huggingface.co/ZhengPeng7/BiRefNet
+    notes: "Model card header says MIT (checked 2026-11-03). Runs at 1024x1024, ~1.6 GB peak in fp16.
+      Its remote code needs einops, kornia, timm. RMBG-2.0 (built on it) is CC BY-NC, do not use."
+
+  - id: qwen3-vl-2b
+    kind: captioning
+    name: Qwen3-VL-2B-Instruct (vision-language captioner)
+    license: Apache-2.0
+    commercial: "yes"
+    min_vram_gb: 6
+    source: https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct
+    notes: "Model card says apache-2.0 (checked 2026-11-03). Used only at style-training time to caption the
+      user's images, never shipped in a game."
+
+  - id: kimodo-soma
+    kind: motion
+    name: NVIDIA Kimodo (SOMA skeleton)
+    license: NVIDIA Open Model License
+    commercial: verify
+    min_vram_gb: 5        # community NF4 fork ~5GB; official ~17GB unless text encoder runs on CPU
+    source: https://huggingface.co/nvidia/Kimodo-G1-RP-v1
+    notes: The G1 model card says ready for commercial use. Confirm the SOMA model card says the same.
+
+  - id: hy-motion-1.0
+    kind: motion
+    name: Tencent HY-Motion 1.0
+    license: Tencent HY-Motion Community License
+    commercial: verify
+    min_vram_gb: 24
+    source: https://github.com/Tencent-Hunyuan/HY-Motion-1.0
+    notes: Sources conflict (MIT / Apache / custom). One source says the custom license excludes EU, UK, South Korea. Read the repo LICENSE.
+
+  - id: momask-mdm-family
+    kind: motion
+    name: MoMask / MDM / T2M-GPT (HumanML3D-trained)
+    license: depends on AMASS-derived training data
+    commercial: "no"
+    source: https://amass.is.tue.mpg.de/license.html
+    notes: AMASS license is non-commercial and prohibits training models for commercial use. Avoid.
+
+  - id: cmu-mocap
+    kind: dataset
+    name: CMU Motion Capture Database (BVH)
+    license: CMU terms
+    commercial: verify
+    source: https://www.roboticscenter.ai/datasets/cmu-mocap/
+    notes: Described as free for all uses. Confirm on CMU's own site; do not resell raw data.

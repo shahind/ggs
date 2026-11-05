@@ -1,0 +1,138 @@
+# Rig Spec v1: side-view humanoid cut-out puppet.
+# Conventions: screen space (+x right, +y down); character faces right; near side = character's RIGHT side.
+# rest_length is relative to a standing height of 1.0 and is only a default; the normalizer measures
+# real bone lengths from each character's part sheet.
+# pivot is a fraction (x, y) of the part cell where the joint (bone start) sits. art_angle is the direction the
+# bone points in the drawing (0 = hanging down, the default; 180 = up; -90 = right). Pivots were tuned in M5 so
+# the joint caps the cutter adds (half the part's width) fit below/above the pivot.
+# attach is where a bone starts on its parent (0 = parent start, 1 = parent end, the default).
+# The pelvis points up from the hip joint, so the thighs attach at its start.
+id: humanoid_side_v1
+version: 1
+view: side
+facing: right
+near_side: right
+
+bones:
+  - {name: pelvis,         parent: null,           rest_length: 0.06}
+  - {name: torso,          parent: pelvis,         rest_length: 0.30}
+  - {name: head,           parent: torso,          rest_length: 0.13}
+  - {name: upper_arm_near, parent: torso,          rest_length: 0.15}
+  - {name: forearm_near,   parent: upper_arm_near, rest_length: 0.14}
+  - {name: hand_near,      parent: forearm_near,   rest_length: 0.07}
+  - {name: upper_arm_far,  parent: torso,          rest_length: 0.15}
+  - {name: forearm_far,    parent: upper_arm_far,  rest_length: 0.14}
+  - {name: hand_far,       parent: forearm_far,    rest_length: 0.07}
+  - {name: thigh_near,     parent: pelvis,         rest_length: 0.24, attach: 0.0}
+  - {name: shin_near,      parent: thigh_near,     rest_length: 0.24}
+  - {name: foot_near,      parent: shin_near,      rest_length: 0.10}
+  - {name: thigh_far,      parent: pelvis,         rest_length: 0.24, attach: 0.0}
+  - {name: shin_far,       parent: thigh_far,      rest_length: 0.24}
+  - {name: foot_far,       parent: shin_far,       rest_length: 0.10}
+
+# Back-to-front drawing order. The renderer swaps near/far limb groups when depth says the sides cross.
+draw_order:
+  - upper_arm_far
+  - forearm_far
+  - hand_far
+  - thigh_far
+  - shin_far
+  - foot_far
+  - pelvis
+  - torso
+  - head
+  - thigh_near
+  - shin_near
+  - foot_near
+  - upper_arm_near
+  - forearm_near
+  - hand_near
+
+# Unique art parts. Far-side bones reuse the near-side art (darkened by far_tint) unless a character
+# supplies distinct far parts.
+part_sheet:
+  cell_px: 256
+  cols: 4
+  rows: 3
+  parts:
+    - {name: head,      bone: head,           cell: [0, 0], pivot: [0.50, 0.76], art_angle: 180}
+    - {name: torso,     bone: torso,          cell: [1, 0], pivot: [0.50, 0.83], art_angle: 180}
+    - {name: pelvis,    bone: pelvis,         cell: [2, 0], pivot: [0.50, 0.50], art_angle: 180}
+    - {name: upper_arm, bone: upper_arm_near, bone_far: upper_arm_far, cell: [3, 0], pivot: [0.50, 0.15]}
+    - {name: forearm,   bone: forearm_near,   bone_far: forearm_far,   cell: [0, 1], pivot: [0.50, 0.15]}
+    - {name: hand,      bone: hand_near,      bone_far: hand_far,      cell: [1, 1], pivot: [0.50, 0.15]}
+    - {name: thigh,     bone: thigh_near,     bone_far: thigh_far,     cell: [2, 1], pivot: [0.50, 0.15]}
+    - {name: shin,      bone: shin_near,      bone_far: shin_far,      cell: [3, 1], pivot: [0.50, 0.15]}
+    - {name: foot,      bone: foot_near,      bone_far: foot_far,      cell: [0, 2], pivot: [0.30, 0.35], art_angle: -90}
+  head_variants:
+    - {name: blink,      cell: [1, 2]}
+    - {name: mouth_open, cell: [2, 2]}
+    - {name: hurt,       cell: [3, 2]}
+
+# Attachment points. t = position along the bone (0 start, 1 end); offset = perpendicular, in bone lengths.
+sockets:
+  - {name: grip_near, bone: hand_near, t: 0.5, offset: 0.0}
+  - {name: grip_far,  bone: hand_far,  t: 0.5, offset: 0.0}
+  - {name: back,      bone: torso,     t: 0.6, offset: -0.4}
+  - {name: hip,       bone: pelvis,    t: 0.5, offset: 0.4}
+  - {name: head_top,  bone: head,      t: 1.0, offset: 0.0}
+  - {name: seat,      bone: pelvis,    t: 0.5, offset: 0.0}
+  - {name: ground,    bone: foot_near, t: 0.5, offset: 0.5}
+
+# Mocap joint names -> bone vectors (from_joint, to_joint). DRAFT: verify against real clips in milestone M1.
+# Mixamo names: strip the "mixamorig:" prefix before lookup.
+mocap_profiles:
+  mixamo:
+    pelvis:         [Hips, Spine]
+    torso:          [Spine, Neck]
+    head:           [Neck, HeadTop_End]
+    upper_arm_near: [RightArm, RightForeArm]
+    forearm_near:   [RightForeArm, RightHand]
+    hand_near:      [RightHand, RightHandMiddle1]
+    upper_arm_far:  [LeftArm, LeftForeArm]
+    forearm_far:    [LeftForeArm, LeftHand]
+    hand_far:       [LeftHand, LeftHandMiddle1]
+    thigh_near:     [RightUpLeg, RightLeg]
+    shin_near:      [RightLeg, RightFoot]
+    foot_near:      [RightFoot, RightToeBase]
+    thigh_far:      [LeftUpLeg, LeftLeg]
+    shin_far:       [LeftLeg, LeftFoot]
+    foot_far:       [LeftFoot, LeftToeBase]
+  # CMU ASF/AMC names. Not usable yet: there is no ASF/AMC parser (BVH only).
+  cmu_asf:
+    pelvis:         [root, lowerback]
+    torso:          [lowerback, lowerneck]
+    head:           [lowerneck, head]
+    upper_arm_near: [rhumerus, rradius]
+    forearm_near:   [rradius, rwrist]
+    hand_near:      [rwrist, rhand]
+    upper_arm_far:  [lhumerus, lradius]
+    forearm_far:    [lradius, lwrist]
+    hand_far:       [lwrist, lhand]
+    thigh_near:     [rfemur, rtibia]
+    shin_near:      [rtibia, rfoot]
+    foot_near:      [rfoot, rtoes]
+    thigh_far:      [lfemur, ltibia]
+    shin_far:       [ltibia, lfoot]
+    foot_far:       [lfoot, ltoes]
+  # CMU BVH conversions (cgspeed / Bruce Hahne naming). Verified on 02_01 (walk) in M1. Those files start
+  # with an added T-pose frame; the retargeter drops it. Never map a bone to a joint and its zero-offset child (LowerBack under Hips,
+  # LeftFingerBase under LeftHand): the bone would have zero length.
+  cmu_bvh:
+    pelvis:         [Hips, Spine]
+    torso:          [Spine, Neck]
+    head:           [Neck, Head_End]
+    upper_arm_near: [RightArm, RightForeArm]
+    forearm_near:   [RightForeArm, RightHand]
+    hand_near:      [RightHand, RightHandIndex1]
+    upper_arm_far:  [LeftArm, LeftForeArm]
+    forearm_far:    [LeftForeArm, LeftHand]
+    hand_far:       [LeftHand, LeftHandIndex1]
+    thigh_near:     [RightUpLeg, RightLeg]
+    shin_near:      [RightLeg, RightFoot]
+    foot_near:      [RightFoot, RightToeBase]
+    thigh_far:      [LeftUpLeg, LeftLeg]
+    shin_far:       [LeftLeg, LeftFoot]
+    foot_far:       [LeftFoot, LeftToeBase]
+  # TODO(M10): fill from the Kimodo SOMA skeleton docs. Empty = not mapped yet.
+  soma: {}

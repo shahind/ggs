@@ -1,0 +1,10 @@
+# Two-hand ready hold for long items (spear, staff, two-handed sword). The near arm is keyed; export solves the
+# far arm with IK so the far hand reaches the item's second grip.
+format: ggs.keys
+version: 1
+name: hold_two_hand
+fps: 24
+frames: 2
+loop: true
+keys:
+  - {frame: 0, angles: {upper_arm_near: -15, forearm_near: -65, hand_near: -65}}

@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ggs"
+version = "0.0.1"
+description = "Game Graphic Studio: local AI generation of game-ready 2D assets"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26",
+  "pydantic>=2.5",
+  "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+image = ["pillow>=10"]
+# Desktop app (M9): PySide6 is LGPL-3.0, linked dynamically (fine for a closed-source app; ship its licence).
+ui = ["PySide6>=6.7", "pillow>=10"]
+# Install the CUDA build of torch first (see README); torch>=2.10 is required by the staged pipeline.
+gpu = [
+  "torch>=2.10",
+  "torchvision",
+  "diffusers>=0.42",
+  "transformers>=5.0",
+  "accelerate",
+  "peft",
+  "safetensors",
+  "gguf",
+  "einops",   # BiRefNet remote code
+  "kornia",   # BiRefNet remote code
+  "timm",     # BiRefNet remote code
+]
+dev = ["pytest>=8", "ruff>=0.5"]
+
+[project.scripts]
+ggs = "ggs.cli:main"
+
+[project.gui-scripts]
+ggs-studio = "ggs.ui.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"ggs.export.engines" = ["*.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "gpu: needs a CUDA GPU (skipped by default)",
+  "mocap_data: needs real clips in data/mocap/ (skipped when missing)",
+]
+addopts = "-m 'not gpu'"
+
+[tool.ruff]
+line-length = 100

@@ -1,0 +1,20 @@
+# Recipe: background_wrap - like background, but the scene and its far layer wrap horizontally for
+# endless scrolling.
+id: background_wrap
+kind: background
+description: Side-view scene that wraps horizontally, plus its far layer
+base_model: flux2-klein-4b
+matting: birefnet
+size: [1344, 768]
+background: "#FFFFFF"
+prompt_template: "{style}{description}"   # unused: the layers have their own templates
+seamless_x: true
+layers:
+  - name: far
+    opaque: true
+    parallax: 0.2
+    prompt_template: >-
+      {style}wide side-view 2D game background of {description} with layered depth: sky, distant scenery, middle
+      distance and a close foreground along the bottom, no characters, no text
+post: {alpha_low: 0.04, alpha_high: 0.96, padding: 0, power_of_two: false}
+min_profile: lite

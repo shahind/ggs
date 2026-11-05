@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# project data, weights, datasets, outputs
+.ggs/
+*.safetensors
+*.gguf
+*.ckpt
+*.pt
+*.bin
+datasets/
+data/
+outputs/
+cache/
+
+.env

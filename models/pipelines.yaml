@@ -1,0 +1,50 @@
+# Where GGS finds model files on disk, per pipeline and hardware profile.
+# Paths are relative to the model folders listed by `ggs models dirs` (~/.ggs/models first, then any folder
+# added with `ggs models add-dir`, e.g. a ComfyUI models folder). Candidates are tried in order; the first
+# one that exists wins. Nothing here is downloaded automatically.
+pipelines:
+  flux2-klein-4b:
+    registry: flux2-klein-4b
+    loader: flux2_klein
+    configs: [FLUX.2-klein-4B]                       # diffusers configs + tokenizer (no weights needed)
+    text_encoder:
+      - text_encoders/qwen_3_4b.safetensors          # ComfyUI single file (Qwen3-4B, bf16)
+      - FLUX.2-klein-4B/text_encoder                 # diffusers layout
+    transformer:
+      standard:
+        - FLUX.2-klein-4B-GGUF/flux-2-klein-4b-Q8_0.gguf
+        - FLUX.2-klein-4B/transformer
+        - FLUX.2-klein-4B-GGUF/flux-2-klein-4b-Q4_K_M.gguf
+      lite:
+        - FLUX.2-klein-4B-GGUF/flux-2-klein-4b-Q4_K_M.gguf
+        - FLUX.2-klein-4B-GGUF/flux-2-klein-4b-Q4_K_S.gguf
+    vae: [FLUX.2-klein-4B/vae]
+    defaults: {steps: 4, guidance: 1.0}
+    training: {resolution: 512, max_resolution: {lite: 768, standard: 1024}, steps: 1500, lr: 1.0e-4, rank: 16}
+
+  sdxl:
+    registry: sdxl-base-1.0
+    loader: sdxl
+    configs: [stable-diffusion-xl-base-1.0]           # model_index, scheduler, tokenizers, configs
+    text_encoder: [stable-diffusion-xl-base-1.0]      # holds text_encoder/ (CLIP-L) and text_encoder_2/ (bigG)
+    transformer:                                      # the UNet: a diffusers folder or a single .safetensors
+      lite: [stable-diffusion-xl-base-1.0/unet]
+    vae:
+      - sdxl-vae-fp16-fix                             # the original SDXL VAE overflows in half precision
+      - stable-diffusion-xl-base-1.0/vae
+    extras:
+      speed_lora: [SDXL-Lightning/sdxl_lightning_8step_lora.safetensors]   # 8 steps, no CFG
+    # without the speed LoRA: `steps` with CFG `guidance`; with it: `speed_steps`, CFG off
+    defaults: {steps: 30, guidance: 6.0, speed_steps: 8,
+               negative: "blurry, lowres, jpeg artifacts, watermark, text, signature, cropped, frame"}
+    training: {resolution: 1024, max_resolution: {lite: 1024, standard: 1024}, steps: 1500, lr: 1.0e-4, rank: 16}
+
+matting:
+  birefnet:
+    registry: birefnet
+    path: [BiRefNet]
+
+captioning:
+  qwen3-vl-2b:
+    registry: qwen3-vl-2b
+    path: [Qwen3-VL-2B-Instruct]
