@@ -34,7 +34,7 @@ BASE_SKIP = ["Doc", "include", "libs", "Scripts", "tcl", "Lib/site-packages", "L
              "Lib/tkinter", "Lib/turtledemo", "Lib/ensurepip", "DLLs/_tkinter.pyd", "DLLs/tcl*.dll",
              "DLLs/tk*.dll", "NEWS.txt"]
 SITE_SKIP = ["__editable__*", "ggs-*.dist-info", "pytest*", "_pytest", "pluggy*", "iniconfig*", "ruff*", "pip",
-             "pip-*.dist-info", "torch/include", "torch/lib/*.lib", "torch/test", "torchgen", "*/__pycache__",
+             "pip-*.dist-info", "torch/include", "torch/lib/*.lib", "torch/test", "pkg_resources/tests", "setuptools/tests", "torchgen", "*/__pycache__",
              "__pycache__"]
 # Qt: the app only uses QtCore/QtGui/QtWidgets; drop WebEngine, QML/Quick, 3D, multimedia and the tools (~600 MB)
 QT_KEEP_MODULES = {"Core", "Gui", "Widgets", "Svg", "Network", "OpenGL", "OpenGLWidgets", "SvgWidgets"}

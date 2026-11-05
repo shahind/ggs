@@ -52,6 +52,18 @@ Filename: "{app}\python\pythonw.exe"; Parameters: "-m ggs.ui.app"; WorkingDir: "
 Type: filesandordirs; Name: "{app}\python"
 
 [Code]
+// Windows paths stop at 260 characters and the deepest bundled file is ~140 characters below the app folder.
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if (CurPageID = wpSelectDir) and (Length(WizardDirValue) > 110) then
+  begin
+    MsgBox('Please choose a shorter folder path (at most 110 characters).', mbError, MB_OK);
+    Result := False;
+  end;
+end;
+
+
 function NeedsAddPath(Dir: string): Boolean;
 var
   Paths: string;

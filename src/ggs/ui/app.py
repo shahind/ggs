@@ -96,6 +96,9 @@ def main(argv: list[str] | None = None) -> int:
     app.setApplicationName("GGS")
     app.setStyle("Fusion")
     app.setStyleSheet(QSS)
+    from ggs.ui.icons import icon
+
+    app.setWindowIcon(icon("assets"))
     win = MainWindow(project)
     win.show()
     if "--no-setup" not in argv:
