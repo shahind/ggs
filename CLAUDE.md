@@ -122,6 +122,8 @@ python tools/make_motion_library.py   # starter set (motions/clips) with Kimodo;
 python -m ggs export cycle.json --character chars/pa/character.yaml --format godot --out build/hero  # or unity|defold
 python -m ggs asset gen Hero --project <dir> --action new --text "a clown"   # refine|regenerate|goto --version N
 python -m ggs asset accept Hero --project <dir>                                # keep the design (items/character/hero/design)
+python -m ggs asset delete Hero --project <dir> [--current|--drawing N|--sliced|--frames walk]  # to the Recycle Bin
+python -m ggs motion remove wave --project <dir>; python -m ggs project delete <dir>
 python -m ggs character slice Hero --project <dir> --template side_simple      # sliced version (rigs/slice_templates.yaml)
 python -m ggs character frames Hero --project <dir> --clip motions/clips/walk.json --frames 8   # drawn frames
 python -m ggs export walk.json punch.json --character <item>/sliced/character.yaml --format godot --out build/hero

@@ -31,6 +31,7 @@ class MainWindow(QMainWindow):
         self.start = StartScreen(self.settings)
         self.start.open_project.connect(self.open_project)
         self.start.new_project.connect(self.new_project)
+        self.start.delete_project.connect(self.delete_project)
         self.stack.addWidget(self.start)
         self.view = None
         if project and (Path(project) / ".ggs" / "project.yaml").exists():
@@ -60,6 +61,31 @@ class MainWindow(QMainWindow):
         self.start.refresh()
         self.stack.setCurrentWidget(self.start)
         self.setWindowTitle(f"GGS - Game Graphic Studio {__version__}")
+
+    def delete_project(self, project: Path, how: str) -> None:
+        from ggs.ui.errors import busy_refusal, show_error
+        from ggs.ui.start import forget
+
+        if how == "delete":
+            if busy_refusal(self, self.queue):
+                return
+            if self.view is not None and Path(self.view.project) == Path(project):
+                self.stack.removeWidget(self.view)  # the open project's pages hold files open
+                self.view.deleteLater()
+                self.view = None
+            from ggs.style.package import StyleError, delete_project
+            from ggs.trash import TrashError
+
+            try:
+                delete_project(project)
+            except (StyleError, TrashError, OSError) as exc:
+                show_error(self, str(exc), "Not deleted",
+                           f"The project could not be moved to the Recycle Bin ({exc}). Close any program that "
+                           "has a file of it open and try again.")
+                self.start.refresh()
+                return
+        forget(self.settings, project)
+        self.start.refresh()
 
     def new_project(self) -> None:
         dlg = NewProjectDialog(self)

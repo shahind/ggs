@@ -42,6 +42,10 @@ ENGINE_FORMATS = [("Godot", "godot"), ("Unity", "unity"), ("Defold", "defold"), 
 ANIM_FORMATS = [*ENGINE_FORMATS, ("GIF (one per animation)", "gif"), ("Animated PNG", "apng"),
                 ("WebP", "webp"), ("Sprite sheets", "sheet")]
 ADDED = re.compile(r"^added (.+\.json)\s*$")
+METHODS = [("Cut-out animation", ("The sliced pieces move like a puppet: any animation from the library, instantly, "
+                                 "and they stay editable in your engine.")),
+           ("Drawn frames", ("The drawing model draws the character in every frame of one animation: clothes and hair "
+                            "move naturally; takes a few minutes per animation."))]
 
 
 def _h(text: str) -> QLabel:
@@ -68,6 +72,7 @@ class MotionList(QWidget):
     """The project's animations first, then the library (search it). Only names, lengths and kinds are shown."""
 
     current_changed = Signal(object)  # the row dict (or None)
+    removed = Signal()  # one of the project's animations was deleted
 
     def __init__(self, project: Path, multi: bool = False):
         super().__init__()
@@ -81,6 +86,8 @@ class MotionList(QWidget):
         if multi:
             self.list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.list.currentItemChanged.connect(lambda it, _p: self.current_changed.emit(it.data(ROW) if it else None))
+        self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self._menu)
         lay.addWidget(self.list, 1)
         self.multi = multi
         self.timer = QTimer(self)
@@ -164,6 +171,33 @@ class MotionList(QWidget):
                 r = it.data(ROW)
                 if r and (r["kind"], r.get("path") or r.get("ref")) in ids:
                     it.setCheckState(Qt.CheckState.Checked)
+
+    def _menu(self, pos) -> None:
+        it = self.list.itemAt(pos)
+        r = it.data(ROW) if it else None
+        if not r or r["kind"] != "project":
+            return
+        from PySide6.QtWidgets import QMenu
+
+        from ggs.ui.errors import trash_icon
+
+        menu = QMenu(self)
+        act = menu.addAction(trash_icon(self), f"Delete '{r['name']}' from this project...")
+        if menu.exec(self.list.mapToGlobal(pos)) is act:
+            self.delete_row(r)
+
+    def delete_row(self, r: dict) -> None:
+        from ggs.rig.library import delete_clip
+        from ggs.ui.errors import confirm_delete, show_error
+
+        if not confirm_delete(self, f"the animation '{r['name']}'", "Characters already exported keep it."):
+            return
+        try:
+            delete_clip(r["path"])
+        except OSError as exc:
+            show_error(self, str(exc), "Not deleted")
+        self.reload()
+        self.removed.emit()
 
     def checked_items(self) -> list[QListWidgetItem]:
         return [self.list.item(i) for i in range(self.list.count())
@@ -310,6 +344,12 @@ class SlicedTab(QWidget):
         self.make.setObjectName("primary")
         self.make.clicked.connect(self._make)
         left.addWidget(self.make)
+        from ggs.ui.errors import trash_icon
+
+        self.delete = QPushButton("Delete sliced version")
+        self.delete.setIcon(trash_icon(self))
+        self.delete.clicked.connect(self._delete)
+        left.addWidget(self.delete)
         left.addStretch(1)
         left.addWidget(_h("Export the sliced version"))
         left.addWidget(_muted("The pieces and the skeleton on their own, for your engine (no animations needed)."))
@@ -330,8 +370,15 @@ class SlicedTab(QWidget):
         left.addWidget(self.export)
         wrap = QWidget()
         wrap.setLayout(left)
-        wrap.setFixedWidth(330)
-        lay.addWidget(wrap)
+        from PySide6.QtWidgets import QScrollArea
+
+        scroll = QScrollArea()  # scrolls on short screens instead of making the window taller than them
+        scroll.setWidget(wrap)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setFixedWidth(348)
+        lay.addWidget(scroll)
         right = QVBoxLayout()
         self.stage = ImageStage(empty="No sliced version yet.\nPick a layout and press Make sliced version.")
         right.addWidget(self.stage, 1)
@@ -370,6 +417,21 @@ class SlicedTab(QWidget):
                                 "try again, or change the design (simpler clothes cut better).")
         self.make.setText("Make it again" if ok else "Make sliced version")
         self.export.setEnabled(ok)
+        self.delete.setVisible(sliced_dir(self.ws.dir).exists())
+
+    def _delete(self) -> None:
+        from ggs.items import ItemError, delete_sliced
+        from ggs.ui.errors import busy_refusal, confirm_delete, show_error
+
+        if busy_refusal(self, self.queue) or not confirm_delete(
+                self, "the sliced version", "Cut-out animation needs it; you can make it again any time."):
+            return
+        try:
+            delete_sliced(self.project, f"character/{self.ws.rec.name}")
+        except (ItemError, OSError) as exc:
+            show_error(self, str(exc), "Not deleted")
+        self.refresh()
+        self.ws.changed.emit()
 
     def _make(self) -> None:
         t = self.templates[self.group.checkedId()]
@@ -424,21 +486,19 @@ class AnimateTab(QWidget):
         lay.addWidget(_h("How should it move?"))
         row = QHBoxLayout()
         self.methods = QButtonGroup(self)
-        for i, (title, text) in enumerate((
-                ("Cut-out animation", ("The sliced pieces move like a puppet. Any animation from the library, "
-                                      "instantly, and they stay editable in your engine.")),
-                ("Drawn frames", ("The drawing model draws the character in every frame of one animation. Clothes "
-                                 "and hair move naturally; takes a few minutes per animation.")))):
-            b = QPushButton(f"{title}\n{text}")
+        for i, (title, text) in enumerate(METHODS):
+            b = QPushButton(title)
             b.setObjectName("tile")
             b.setCheckable(True)
-            b.setStyleSheet("text-align: left; padding: 10px;")
-            b.setMinimumHeight(70)
+            b.setMinimumHeight(40)
+            b.setToolTip(text)
             self.methods.addButton(b, i)
             row.addWidget(b, 1)
         self.methods.button(0).setChecked(True)
         self.methods.idClicked.connect(self._method)
         lay.addLayout(row)
+        self.about = _muted(METHODS[0][1])
+        lay.addWidget(self.about)
         self.stack = QStackedWidget()
         self.cutout = CutoutPanel(self)
         self.drawn = DrawnPanel(self)
@@ -447,6 +507,7 @@ class AnimateTab(QWidget):
         lay.addWidget(self.stack, 1)
 
     def _method(self, i: int) -> None:
+        self.about.setText(METHODS[i][1])
         self.stack.setCurrentIndex(i)
         self.refresh()
 
@@ -477,6 +538,7 @@ class CutoutPanel(QWidget):
         left.addWidget(_muted("Click an animation to see it; tick the ones to export."))
         self.list = MotionList(self.project, multi=True)
         self.list.current_changed.connect(self._show)
+        self.list.removed.connect(self.ws.changed.emit)
         left.addWidget(self.list, 1)
         lay.addLayout(left, 2)
         right = QVBoxLayout()
@@ -598,6 +660,7 @@ class DrawnPanel(QWidget):
         left.addWidget(_muted("1. Pick an animation"))
         self.list = MotionList(self.project)
         self.list.current_changed.connect(lambda _r: self._poses())
+        self.list.removed.connect(self.ws.changed.emit)
         left.addWidget(self.list, 1)
         done_lab = _muted("Drawn before")
         left.addWidget(done_lab)
@@ -631,8 +694,16 @@ class DrawnPanel(QWidget):
         self.open = QPushButton("Open folder")
         self.open.clicked.connect(self._open)
         self.open.setEnabled(False)
+        from ggs.ui.errors import trash_icon
+
+        self.delete = QPushButton("Delete")
+        self.delete.setIcon(trash_icon(self))
+        self.delete.setToolTip("Delete these drawn frames")
+        self.delete.clicked.connect(self._delete)
+        self.delete.setEnabled(False)
         row.addWidget(self.draw)
         row.addWidget(self.open)
+        row.addWidget(self.delete)
         row.addStretch(1)
         right.addLayout(row)
         self.note = _muted("")
@@ -743,7 +814,30 @@ class DrawnPanel(QWidget):
         self.result.setVisible(True)
         self.result.play(gif)
         self.open.setEnabled(True)
+        self.delete.setEnabled(True)
         self.note.setText(f"Saved with the character: {folder.name} (animated PNG, WebP, sprite sheet and frames).")
+
+    def _delete(self) -> None:
+        from ggs.items import ItemError, delete_frames
+        from ggs.ui.errors import busy_refusal, confirm_delete, show_error
+
+        if self.shown is None or busy_refusal(self, self.queue):
+            return
+        label = self.shown.name.replace("_", " ")
+        if not confirm_delete(self, f"the drawn frames '{label}'"):
+            return
+        self.result.play(None)  # the GIF file is open while it plays
+        try:
+            delete_frames(self.project, f"character/{self.ws.rec.name}", self.shown.name)
+        except (ItemError, OSError) as exc:
+            show_error(self, str(exc), "Not deleted")
+        self.shown = None
+        self.open.setEnabled(False)
+        self.delete.setEnabled(False)
+        self.note.setText("")
+        self.result.setVisible(False)
+        self.poses.setVisible(True)
+        self._fill_done()
 
     def _open(self) -> None:
         from PySide6.QtCore import QUrl

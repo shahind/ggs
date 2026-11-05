@@ -136,6 +136,17 @@ def init_project(path: str | Path, name: str | None = None, base_model: str | No
     return meta_path
 
 
+def delete_project(path: str | Path) -> Path:
+    """Move a whole project folder to the Recycle Bin (only a folder that really is a GGS project)."""
+    from ggs.trash import move_to_trash
+
+    root = require_project(path).resolve()
+    if root == Path(root.anchor) or root == Path.home().resolve():
+        raise StyleError(f"{root} is not a project folder that can be deleted")
+    move_to_trash(root)
+    return root
+
+
 def require_project(path: str | Path) -> Path:
     root = Path(path)
     if not (project_dir(root) / "project.yaml").exists():

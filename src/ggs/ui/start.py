@@ -48,8 +48,13 @@ def default_location() -> Path:
     return Path.home() / "Documents" / "GGS Projects"
 
 
+def forget(settings: QSettings, project: Path) -> None:
+    settings.setValue(PROJECTS_KEY, [str(p) for p in known_projects(settings) if p != Path(project)])
+
+
 class ProjectCard(QFrame):
     clicked = Signal(Path)
+    delete = Signal(Path)
 
     def __init__(self, project: Path | None):
         super().__init__()
@@ -87,11 +92,25 @@ class ProjectCard(QFrame):
         lay.addWidget(name)
         sub = QLabel(f"{len(items)} item{'s' if len(items) != 1 else ''}")
         sub.setObjectName("muted")
-        lay.addWidget(sub)
+        row = QHBoxLayout()
+        row.addWidget(sub, 1)
+        from ggs.ui.errors import trash_icon
+
+        rm = QPushButton()
+        rm.setObjectName("flat")
+        rm.setIcon(trash_icon(self))
+        rm.setToolTip("Delete this project, or take it off this list")
+        rm.setCursor(Qt.CursorShape.ArrowCursor)
+        rm.clicked.connect(lambda: self.delete.emit(project))
+        row.addWidget(rm)
+        lay.addLayout(row)
         self.setToolTip(str(project))
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(lambda _pos: self.delete.emit(project))
 
     def mousePressEvent(self, e) -> None:
-        self.clicked.emit(self.project if self.project else Path())
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self.project if self.project else Path())
 
 
 class NewProjectDialog(QDialog):
@@ -147,9 +166,28 @@ class NewProjectDialog(QDialog):
         self.accept()
 
 
+def ask_delete_project(parent, project: Path) -> str | None:
+    """'delete' (to the Recycle Bin), 'forget' (off the list, files stay) or None."""
+    from PySide6.QtWidgets import QMessageBox
+
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle("Delete project")
+    box.setText(f"Delete the project '{project.name}'?")
+    box.setInformativeText(f"{project}\n\nDelete moves the whole folder (every character, asset, animation and "
+                           "export in it) to the Recycle Bin. 'Remove from list' only takes it off this screen.")
+    delete = box.addButton("Delete", QMessageBox.ButtonRole.DestructiveRole)
+    forget = box.addButton("Remove from list", QMessageBox.ButtonRole.ActionRole)
+    box.addButton(QMessageBox.StandardButton.Cancel)
+    box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+    box.exec()
+    return {delete: "delete", forget: "forget"}.get(box.clickedButton())
+
+
 class StartScreen(QWidget):
     open_project = Signal(Path)
     new_project = Signal()
+    delete_project = Signal(Path, str)  # project, 'delete' or 'forget'
 
     def __init__(self, settings: QSettings):
         super().__init__()
@@ -186,6 +224,7 @@ class StartScreen(QWidget):
         cards = [ProjectCard(None)] + [ProjectCard(p) for p in known_projects(self.settings)]
         for i, c in enumerate(cards):
             c.clicked.connect(self._card)
+            c.delete.connect(self._delete)
             self.grid.addWidget(c, i // 4, i % 4)
 
     def _card(self, p: Path) -> None:
@@ -193,6 +232,11 @@ class StartScreen(QWidget):
             self.new_project.emit()
         else:
             self.open_project.emit(p)
+
+    def _delete(self, p: Path) -> None:
+        choice = ask_delete_project(self, p)
+        if choice:
+            self.delete_project.emit(p, choice)
 
     def _open_folder(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Project folder", str(default_location()))

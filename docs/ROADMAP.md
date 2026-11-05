@@ -183,6 +183,13 @@ Each milestone is done only when its acceptance check passes. Update this file a
   form (import, describe, train, install) and no longer lets training start without captions. The old
   Animations > Export tab (old-style characters only) is gone: animating is on the character page.
 - Library lists show motion names only (no dataset or author names); CREDITS.txt in exports is unchanged.
+- Follow-up (2026-11-05): deleting. Drawings (Previous/Next history; a deleted drawing a later change was drawn
+  on top of stays as a hidden recipe), items, sliced versions, drawn frames, the project's animations and whole
+  projects. Everything goes to the Recycle Bin (`ggs.trash`); CLI: `asset delete`, `motion remove`,
+  `project delete`. The app refuses to delete while a job runs. Layout: the item header is two rows and the
+  Animate method buttons no longer carry long text, so the window fits 1280x720 (laptop at 150 % scaling).
+  Progress: `@stage`/`@progress` markers are found anywhere in a line (a loading bar on stderr can share it),
+  the last lines of a job are no longer dropped, and slicing has its own "cut" stage.
 
 ## Open decisions for the owner
 - Hard rule 5 vs VFX: is brightness-as-alpha for additive particle textures acceptable? (It is how emissive

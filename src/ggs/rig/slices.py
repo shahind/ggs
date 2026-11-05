@@ -161,7 +161,8 @@ def make_slices(project: Path, ref: str, template: str, *, seeds: list[int] | No
         style, weight = f"{meta.trigger}, ", drawing.get("style_weight") or meta.recommended_weight
     seeds = seeds or [drawing["seed"] + i for i in range(3)]
     view_words = "side view facing right" if view == "side" else "front view facing the viewer, symmetrical T-pose"
-    progress.start(f"slices:{model}", ["encode", "denoise", "matte"] + (["denoise", "matte"] if t.refine else []))
+    progress.start(f"slices:{model}", ["encode", "denoise", "matte", "cut"] +
+                   (["denoise", "matte"] if t.refine else []))
     recipe = load_recipe("sprite")
     gen, matter = build_backends(recipe, model, profile)
     stages = Stages(profile=profile, enforce=enforce_vram)
@@ -187,17 +188,18 @@ def make_slices(project: Path, ref: str, template: str, *, seeds: list[int] | No
         shutil.rmtree(work)
     tries, best = [], None
     spec0 = guide.spec.model_copy(update={"body": body.model_dump(), "prompt": prompt, "model": model})
-    for sd, img, alpha in zip(seeds, images, alphas):
-        rgba, _, _ = real_rgba(img, alpha, recipe.post.alpha_low, recipe.post.alpha_high)
-        folder = work / f"seed_{sd:06d}"
-        master = save_master(folder, spec0.model_copy(update={"seed": sd}), Image.fromarray(rgba, "RGBA"), guide)
-        img.save(folder / "master_raw.png")
-        outcome = cut_master(master, rig, folder / "character", rec.name)
-        fails = [f"{c.name}: {c.detail}" for c in outcome.report.checks if not c.passed]
-        tries.append({"seed": sd, "passed": outcome.report.passed, "score": round(outcome.report.score, 4),
-                      "folder": str(folder), "failures": fails[:6], "cut": outcome.character is not None})
-        if outcome.report.passed and best is None:
-            best = folder / "character"
+    with stages.stage("cut"):  # CPU: cut every try into pieces and check it (the longest part after drawing)
+        for sd, img, alpha in zip(seeds, images, alphas):
+            rgba, _, _ = real_rgba(img, alpha, recipe.post.alpha_low, recipe.post.alpha_high)
+            folder = work / f"seed_{sd:06d}"
+            master = save_master(folder, spec0.model_copy(update={"seed": sd}), Image.fromarray(rgba, "RGBA"), guide)
+            img.save(folder / "master_raw.png")
+            outcome = cut_master(master, rig, folder / "character", rec.name)
+            fails = [f"{c.name}: {c.detail}" for c in outcome.report.checks if not c.passed]
+            tries.append({"seed": sd, "passed": outcome.report.passed, "score": round(outcome.report.score, 4),
+                          "folder": str(folder), "failures": fails[:6], "cut": outcome.character is not None})
+            if outcome.report.passed and best is None:
+                best = folder / "character"
     rough = False
     if best is None:
         usable = [t for t in tries if t["cut"] and t["score"] >= ROUGH_IOU]

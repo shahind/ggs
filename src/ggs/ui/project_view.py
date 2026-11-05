@@ -6,8 +6,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
-from PySide6.QtCore import QSize, Signal
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -99,6 +99,10 @@ class ProjectView(QWidget):
         self.tree.setHeaderHidden(True)
         self.tree.setIconSize(QSize(28, 28))
         self.tree.itemSelectionChanged.connect(self._selected)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._menu)
+        QShortcut(QKeySequence.StandardKey.Delete, self.tree, activated=self._delete_selected,
+                  context=Qt.ShortcutContext.WidgetShortcut)
         lv.addWidget(self.tree, 1)
         split.addWidget(left)
         self.stack = QStackedWidget()
@@ -201,6 +205,7 @@ class ProjectView(QWidget):
             cls = CharacterWorkspace if is_char else ItemWorkspace
             w = cls(self.queue, self.project, d, _styles(self.project), _pipelines())
             w.changed.connect(lambda d=d: self._item_changed(d))
+            w.delete_requested.connect(self.delete_item)
             self.cache[key] = w
             self.stack.addWidget(w)
         self.stack.setCurrentWidget(self.cache[key])
@@ -214,6 +219,83 @@ class ProjectView(QWidget):
         self.tree.blockSignals(True)
         self.refresh(select=d)
         self.tree.blockSignals(False)
+        anims = self.cache.get("animations")
+        if anims is not None:
+            anims.mine.refresh()
+
+    # ------------------------------------------------------------------ deleting (to the Recycle Bin)
+
+    def _menu(self, pos) -> None:
+        it = self.tree.itemAt(pos)
+        if it is None or not (it.data(0, ROLE_DIR) or it.data(0, ROLE_CLIP)):
+            return
+        from PySide6.QtWidgets import QMenu
+
+        from ggs.ui.errors import trash_icon
+
+        menu = QMenu(self)
+        act = menu.addAction(trash_icon(self), f"Delete '{it.text(0)}'...")
+        if menu.exec(self.tree.viewport().mapToGlobal(pos)) is act:
+            self._delete_tree_item(it)
+
+    def _delete_selected(self) -> None:
+        it = self.tree.currentItem()
+        if it is not None:
+            self._delete_tree_item(it)
+
+    def _delete_tree_item(self, it: QTreeWidgetItem) -> None:
+        if it.data(0, ROLE_DIR):
+            self.delete_item(Path(it.data(0, ROLE_DIR)))
+        elif it.data(0, ROLE_CLIP):
+            self.delete_clip(Path(it.data(0, ROLE_CLIP)), it.text(0))
+
+    def delete_item(self, d: Path) -> None:
+        import json
+
+        from ggs.items import ItemError, delete_item
+        from ggs.ui.errors import busy_refusal, confirm_delete, show_error
+
+        if busy_refusal(self, self.queue):
+            return
+        rec = json.loads((d / "item.json").read_text(encoding="utf-8"))
+        is_char = rec.get("asset_class") == "character"
+        what = f"the character '{rec['name']}'" if is_char else f"'{rec['name']}'"
+        detail = ("Its drawings, design, sliced version and drawn frames are deleted with it." if is_char
+                  else "Its drawings are deleted with it.") + " Files you already exported stay."
+        if not confirm_delete(self, what, detail):
+            return
+        w = self.cache.pop(str(d), None)
+        if w is not None:  # close the workspace first: its animations keep their GIF files open
+            from ggs.ui.character_page import Movie
+
+            for m in w.findChildren(Movie):
+                m.play(None)
+            self.stack.setCurrentWidget(self.welcome)
+            self.stack.removeWidget(w)
+            w.deleteLater()
+        try:
+            delete_item(self.project, f"{rec['asset_class']}/{rec['name']}")
+        except (ItemError, OSError) as exc:
+            show_error(self, str(exc), "Not deleted")
+        self.tree.blockSignals(True)
+        self.refresh()
+        self.tree.blockSignals(False)
+        self.stack.setCurrentWidget(self.welcome)
+
+    def delete_clip(self, clip: Path, label: str) -> None:
+        from ggs.rig.library import delete_clip
+        from ggs.ui.errors import confirm_delete, show_error
+
+        if not confirm_delete(self, f"the animation '{label}'", "Characters already exported keep it."):
+            return
+        try:
+            delete_clip(clip)
+        except OSError as exc:
+            show_error(self, str(exc), "Not deleted")
+        self._anims_changed()
+        anims = self.cache.get("animations")
+        if anims is not None:
+            anims.mine.refresh()
 
     def _section(self, node: str) -> QWidget:
         if node in self.cache:

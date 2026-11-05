@@ -9,6 +9,7 @@ STAGES = {  # @stage <name> markers (GGS_PROGRESS=1) -> what the user sees
     "denoise": "Drawing...",
     "decode": "Drawing...",
     "matte": "Cutting it out...",
+    "cut": "Cutting it into pieces and checking them...",
     "latents": "Preparing your images...",
     "train": "Training the style (this takes a while)...",
     "control": "Reading the pose...",
@@ -73,7 +74,7 @@ def friendly_error(raw: str) -> str:
 
 
 def stage_text(line: str) -> str | None:
-    m = re.match(r"@stage (\w+)", line.strip())
+    m = re.search(r"@stage (\w+)", line)  # search: another program's output can share the line
     return STAGES.get(m.group(1), "Working...") if m else None
 
 
@@ -119,3 +120,34 @@ def show_saved(parent, title: str, path, text: str | None = None) -> None:
     if open_btn is not None and box.clickedButton() is open_btn:
         p = Path(path)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(p if p.is_dir() else p.parent)))
+
+
+def confirm_delete(parent, what: str, detail: str = "") -> bool:
+    """'Delete <what>?' with Delete / Cancel; deleted things go to the Recycle Bin."""
+    from PySide6.QtWidgets import QMessageBox
+
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle("Delete")
+    box.setText(f"Delete {what}?")
+    box.setInformativeText(((detail + "\n\n") if detail else "") +
+                           "It goes to the Recycle Bin, so you can still get it back from there.")
+    yes = box.addButton("Delete", QMessageBox.ButtonRole.DestructiveRole)
+    box.addButton(QMessageBox.StandardButton.Cancel)
+    box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+    box.exec()
+    return box.clickedButton() is yes
+
+
+def busy_refusal(parent, queue) -> bool:
+    """True (after telling the user) when a job is running: nothing is deleted under a running job."""
+    if queue.busy:
+        show_message(parent, "Something is still being made. Wait for it to finish, then delete.")
+        return True
+    return False
+
+
+def trash_icon(widget):
+    from PySide6.QtWidgets import QStyle
+
+    return widget.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon)

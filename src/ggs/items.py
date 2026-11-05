@@ -69,6 +69,7 @@ class Version(BaseModel):
     model: str | None = None
     style: str | None = None
     style_weight: float | None = None
+    hidden: bool = False  # deleted by the user; kept only as the recipe a later change was drawn on top of
 
 
 class ItemSettings(BaseModel):
@@ -96,6 +97,10 @@ class ItemRecord(BaseModel):
     def get_version(self, n: int | None = None) -> Version | None:
         n = self.current if n is None else n
         return next((v for v in self.versions if v.n == n), None)
+
+    def shown(self) -> list[Version]:
+        """The history the user steps through (deleted drawings left out)."""
+        return [v for v in self.versions if not v.hidden]
 
     def design_text(self, n: int | None = None) -> list[str]:
         """The description and every change on the way to drawing ``n`` (oldest first)."""
@@ -530,6 +535,82 @@ def accept(project: Path, ref: str) -> tuple[ItemRecord, Path]:
     rec.accepted = v.n
     save(project, rec)
     return rec, out
+
+
+# ---------------------------------------------------------------- deleting (to the Recycle Bin)
+
+def delete_item(project: Path, ref: str) -> tuple[str, Path]:
+    """Move the whole item (drawings, design, sliced version, drawn frames) to the Recycle Bin."""
+    from ggs.trash import move_to_trash
+
+    rec, d = load(project, ref)
+    move_to_trash(d)
+    shutil.rmtree(cache_dir(d), ignore_errors=True)
+    return rec.name, d
+
+
+def _prune(rec: ItemRecord) -> None:
+    """Forget deleted drawings no shown drawing was drawn on top of."""
+    needed: set[int] = set()
+    for v in rec.shown():
+        p = v.parent
+        while p is not None and p not in needed:
+            needed.add(p)
+            pv = rec.get_version(p)
+            p = pv.parent if pv else None
+    rec.versions = [v for v in rec.versions if not v.hidden or v.n in needed]
+
+
+def delete_drawing(project: Path, ref: str, n: int | None = None) -> tuple[ItemRecord, bool]:
+    """Take drawing ``n`` (default: the one on screen) out of the history. The one before it (else the one after)
+    comes on screen. Returns the record and whether that drawing has to be drawn again (it was not cached)."""
+    rec, d = load(project, ref)
+    n = rec.current if n is None else n
+    v = rec.get_version(n)
+    if v is None or v.hidden:
+        raise ItemError(f"there is no drawing {n!r} in {rec.name!r}")
+    if rec.accepted == n:
+        raise ItemError(f"drawing {n} is {rec.name}'s design: use another design first, or delete the character")
+    shown = [x.n for x in rec.shown()]
+    i = shown.index(n)
+    for f in _files(d / "versions", n) + _files(cache_dir(d), n):
+        f.unlink(missing_ok=True)
+    v.hidden = True
+    _prune(rec)
+    redraw = False
+    if rec.current == n:
+        rest = [x for x in shown if x != n]
+        rec.current = (rest[i - 1] if i > 0 else rest[0]) if rest else None
+        cur = rec.get_version()
+        if cur is not None and not (cur.file and (d / cur.file).exists()):
+            redraw = not _restore(d, cur.n)
+    save(project, rec)
+    return rec, redraw
+
+
+def delete_sliced(project: Path, ref: str) -> Path:
+    from ggs.rig.slices import sliced_dir
+    from ggs.trash import move_to_trash
+
+    _, d = load(project, ref)
+    out = sliced_dir(d)
+    if not out.exists():
+        raise ItemError("there is no sliced version to delete")
+    move_to_trash(out)
+    return out
+
+
+def delete_frames(project: Path, ref: str, name: str) -> Path:
+    """Delete one set of drawn frames (``frames/<name>``)."""
+    from ggs.rig.sprites import frames_dir
+    from ggs.trash import move_to_trash
+
+    _, d = load(project, ref)
+    folder = frames_dir(d) / name
+    if not name or Path(name).name != name or not folder.is_dir():
+        raise ItemError(f"there are no drawn frames called {name!r}")
+    move_to_trash(folder)
+    return folder
 
 
 # ---------------------------------------------------------------- messages and export

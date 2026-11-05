@@ -191,3 +191,48 @@ def test_progress_estimates_from_stage_times(tmp_path, monkeypatch):
     t.finish()
     saved = json.loads((tmp_path / "times.json").read_text(encoding="utf-8"))
     assert saved["k:denoise"] != 0.5 and "*:encode" in saved  # learnt from this run
+
+
+def test_markers_glued_to_a_loading_bar_still_count(qapp):
+    """A model-loading bar writes to stderr without a newline; a step or progress marker printed meanwhile ends up
+    on the same line and must still move the loading placeholder."""
+    import sys
+
+    from PySide6.QtCore import QEventLoop, QTimer
+
+    from ggs.ui.jobs import Job, JobQueue
+
+    code = ("import sys; sys.stderr.write('Loading checkpoint shards:  50%|##   | 1/2 [00:01<00:01, 1.2it/s]'); "
+            "sys.stderr.flush(); print('@stage matte', flush=True); "
+            "sys.stderr.write(chr(13) + ' 60%|###  | 3/5 [00:02<00:01, 1.5it/s]'); sys.stderr.flush(); "
+            "print('@progress 42', flush=True)")
+    q = JobQueue()
+    stages, pcts = [], []
+    q.stage.connect(stages.append)
+    q.progress.connect(pcts.append)
+    loop = QEventLoop()
+    job = Job("glued", [[sys.executable, "-c", code]])
+    results = []
+    job.done = lambda ok: (results.append(ok), loop.quit())
+    q.submit(job)
+    QTimer.singleShot(30000, loop.quit)
+    loop.exec()
+    assert results == [True] and "Cutting it out..." in stages and 42 in pcts
+
+
+def test_long_texts_do_not_widen_the_window(qapp, tmp_path, settings):
+    """Every character tab fits a 1280 px wide window (a laptop at 150 % scaling)."""
+    from ggs import items as I
+    from ggs.style.package import init_project
+    from ggs.ui.app import MainWindow
+
+    p = tmp_path / "g"
+    init_project(p, "Game")
+    I.create(p, "character", "Hero", "a hero")
+    I.generate(p, "Hero", action="new", model="stub", enforce_vram=False)
+    I.accept(p, "Hero")
+    w = MainWindow(p, settings=settings)
+    w.view._open_item(p / "items" / "character" / "hero")
+    hint = w.minimumSizeHint()
+    assert hint.width() <= 1250 and hint.height() <= 720, hint
+    w.close()

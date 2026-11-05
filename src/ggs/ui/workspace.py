@@ -114,9 +114,15 @@ class DrawPanel(QWidget):
         self.next.clicked.connect(lambda: ws.step(1))
         self.regen = _flat("Regenerate", "Draw the same description again with a new seed", "regenerate")
         self.regen.clicked.connect(lambda: ws.run("regenerate"))
+        from ggs.ui.errors import trash_icon
+
+        self.delete = _flat("", "Delete this drawing from the history")
+        self.delete.setIcon(trash_icon(self))
+        self.delete.clicked.connect(ws.delete_drawing)
         row.addWidget(self.prev)
         row.addWidget(self.where)
         row.addWidget(self.next)
+        row.addWidget(self.delete)
         row.addStretch(1)
         row.addWidget(self.regen)
         lay.addLayout(row)
@@ -146,6 +152,7 @@ class DrawPanel(QWidget):
         box.addLayout(col)
         lay.addLayout(box)
         self.typos = QLabel("")
+        self.typos.setWordWrap(True)
         self.typos.setStyleSheet("color: #ff8a8a;")
         lay.addWidget(self.typos)
         self.input.textChanged.connect(self._check_typos)
@@ -156,7 +163,7 @@ class DrawPanel(QWidget):
                            if bad else "")
 
     def _enter(self) -> None:
-        (self._change if self.ws.rec.versions else self._new)()
+        (self._change if self.ws.rec.shown() else self._new)()
 
     def _change(self) -> None:
         text = self.input.toPlainText().strip()
@@ -169,7 +176,7 @@ class DrawPanel(QWidget):
             self.ws.run("new", text)
 
     def set_busy(self, on: bool) -> None:
-        for b in (self.prev, self.next, self.regen, self.change, self.new):
+        for b in (self.prev, self.next, self.regen, self.change, self.new, self.delete):
             b.setEnabled(not on)
         if not on:
             self.ws.refresh_buttons()
@@ -177,6 +184,7 @@ class DrawPanel(QWidget):
 
 class ItemWorkspace(QWidget):
     changed = Signal()  # the item changed (the tree refreshes its thumbnail)
+    delete_requested = Signal(Path)  # the item's Delete button (the project view deletes it)
 
     def __init__(self, queue: JobQueue, project: Path, item_dir: Path, styles: list[str], models: list[str]):
         super().__init__()
@@ -202,17 +210,26 @@ class ItemWorkspace(QWidget):
         head.addWidget(self.title)
         head.addWidget(self.kind_icon)
         head.addWidget(self.kind)
-        self.tabs_box = QHBoxLayout()  # characters: Design | Sliced version | Animate
-        head.addSpacing(16)
-        head.addLayout(self.tabs_box)
         head.addStretch(1)
+        # second row (one long row pushed the window wider than a laptop screen): tabs, export size, Export
+        row2 = QHBoxLayout()
+        self.tabs_box = QHBoxLayout()  # characters: Design | Sliced version | Animate
+        row2.addLayout(self.tabs_box)
+        row2.addStretch(1)
         self.size_group = QButtonGroup(self)
         self.size_box = QHBoxLayout()
-        head.addLayout(self.size_box)
+        row2.addLayout(self.size_box)
         self.export_btn = QPushButton("Export")
         self.export_btn.setIcon(icon("export"))
         self.export_btn.clicked.connect(self._export)
-        head.addWidget(self.export_btn)
+        row2.addWidget(self.export_btn)
+        from ggs.ui.errors import trash_icon
+
+        self.delete_btn = QPushButton()
+        self.delete_btn.setIcon(trash_icon(self))
+        self.delete_btn.setObjectName("flat")
+        self.delete_btn.clicked.connect(lambda: self.delete_requested.emit(self.dir))
+        head.addWidget(self.delete_btn)
         adv = QPushButton("Advanced")
         adv.setIcon(icon("advanced"))
         adv.setObjectName("flat")
@@ -221,6 +238,7 @@ class ItemWorkspace(QWidget):
         head.addWidget(adv)
         self.adv_btn = adv
         main.addLayout(head)
+        main.addLayout(row2)
         self.pages = QStackedWidget()
         main.addWidget(self.pages, 1)
         self.draw = DrawPanel(self)
@@ -262,7 +280,7 @@ class ItemWorkspace(QWidget):
             self.draw.caption.setText("Drawn from: " + "  →  ".join(parts))
 
     def refresh_buttons(self) -> None:
-        ns = [v.n for v in self.rec.versions]
+        ns = [v.n for v in self.rec.shown()]
         cur = self.rec.current
         i = ns.index(cur) if cur in ns else -1
         has = bool(ns) and i >= 0
@@ -279,6 +297,11 @@ class ItemWorkspace(QWidget):
         d.input.setPlaceholderText("Type a change (e.g. 'make the hat blue') and press Change it, or new words "
                                    "and press Draw new" if has else "Describe it, then press Draw")
         self.export_btn.setEnabled(has and not self.working)
+        design = has and self.rec.accepted == cur
+        d.delete.setEnabled(has and not self.working and not design)
+        d.delete.setToolTip("This drawing is the character's design: use another design first, or delete the "
+                            "whole character" if design else "Delete this drawing from the history")
+        self.delete_btn.setToolTip(f"Delete {self.rec.name}")
 
     def _sizes(self, sizes) -> None:
         for b in self.size_group.buttons():
@@ -311,12 +334,30 @@ class ItemWorkspace(QWidget):
     # ------------------------------------------------------------------ actions
 
     def step(self, delta: int) -> None:
-        ns = [v.n for v in self.rec.versions]
+        ns = [v.n for v in self.rec.shown()]
         if self.rec.current not in ns:
             return
         i = ns.index(self.rec.current) + delta
         if 0 <= i < len(ns):
             self._job("goto", version=ns[i], title="Bringing it back...")
+
+    def delete_drawing(self) -> None:
+        from ggs.items import ItemError, delete_drawing
+        from ggs.ui.errors import busy_refusal, confirm_delete, show_error
+
+        if self.rec.current is None or busy_refusal(self, self.queue):
+            return
+        if not confirm_delete(self, "this drawing", "Previous and Next will not show it any more."):
+            return
+        try:
+            rec, redraw = delete_drawing(self.project, f"{self.rec.asset_class}/{self.rec.name}")
+        except (ItemError, OSError) as exc:
+            show_error(self, str(exc), "Not deleted", str(exc)[:1].upper() + str(exc)[1:] + ".")
+            return
+        self.reload()
+        if redraw and rec.current is not None:
+            self._job("goto", version=rec.current, title="Bringing back the drawing before it...")
+        self.changed.emit()
 
     def run(self, action: str, text: str = "") -> None:
         self._save_advanced()
@@ -438,7 +479,7 @@ class CharacterWorkspace(ItemWorkspace):
     def _character_changed(self, cs) -> None:
         self.rec.settings.character = cs
         self._save()
-        if self.rec.versions:
+        if self.rec.shown():
             self.draw.caption.setText(self.draw.caption.text().split("\n")[0] +
                                       "\nPose or body changed: press Regenerate or Draw new to draw it that way.")
 

@@ -190,6 +190,18 @@ def cmd_project_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_project_delete(args: argparse.Namespace) -> int:
+    from ggs.style.package import StyleError, delete_project
+    from ggs.trash import TrashError
+
+    try:
+        print(f"deleted {delete_project(args.path)} (in the Recycle Bin)")
+    except (StyleError, TrashError, OSError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_style_dataset_import(args: argparse.Namespace) -> int:
     from ggs.style.dataset import RIGHTS_WARNING, RightsNotConfirmed, import_dataset
 
@@ -904,6 +916,31 @@ def cmd_asset_accept(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_asset_delete(args: argparse.Namespace) -> int:
+    """Delete an item, one drawing of it, its sliced version or a set of drawn frames (to the Recycle Bin)."""
+    from ggs import items
+    from ggs.trash import TrashError
+
+    project = Path(args.project)
+    try:
+        if args.drawing is not None or args.current:
+            rec, redraw = items.delete_drawing(project, args.item, None if args.current else args.drawing)
+            now = f"v{rec.current:03d}" if rec.current else "nothing"
+            print(f"deleted the drawing; on screen now: {now}" + (" (needs drawing again: asset gen --action goto)"
+                                                                   if redraw else ""))
+        elif args.sliced:
+            print(f"deleted {items.delete_sliced(project, args.item)}")
+        elif args.frames:
+            print(f"deleted {items.delete_frames(project, args.item, args.frames)}")
+        else:
+            name, d = items.delete_item(project, args.item)
+            print(f"deleted {name} ({d}, in the Recycle Bin)")
+    except (items.ItemError, TrashError, OSError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_asset_list(args: argparse.Namespace) -> int:
     from ggs.items import list_items
 
@@ -911,7 +948,7 @@ def cmd_asset_list(args: argparse.Namespace) -> int:
     for rec, d in rows:
         cur = f"v{rec.current:03d}" if rec.current else "-"
         kept = f", design v{rec.accepted:03d}" if rec.accepted else ""
-        print(f"{rec.asset_class:12} {rec.name:28} {len(rec.versions):3} drawings, current {cur}{kept}  ({d})")
+        print(f"{rec.asset_class:12} {rec.name:28} {len(rec.shown()):3} drawings, current {cur}{kept}  ({d})")
     if not rows:
         print("no items yet")
     return 0
@@ -1063,6 +1100,25 @@ def cmd_motion_add(args: argparse.Namespace) -> int:
         for p in [*add_to(names, dest), *catalog.add_to(refs, dest)]:
             print(f"added {p}")
     except (KeyError, FileNotFoundError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_motion_remove(args: argparse.Namespace) -> int:
+    """Delete animations from a project's clips (to the Recycle Bin)."""
+    from ggs.rig.library import delete_clip
+    from ggs.trash import TrashError
+
+    folder = Path(args.project) / "clips"
+    try:
+        for n in args.names:
+            clip = folder / (n if n.endswith(".json") else f"{n}.json")
+            if Path(n).name != n:
+                raise FileNotFoundError(f"{n!r}: give the animation's file name, not a path")
+            for f in delete_clip(clip):
+                print(f"deleted {f}")
+    except (FileNotFoundError, TrashError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     return 0
@@ -1266,6 +1322,16 @@ def build_parser() -> argparse.ArgumentParser:
     aa.add_argument("item")
     aa.add_argument("--project", required=True)
     aa.set_defaults(func=cmd_asset_accept)
+    ad = ast.add_parser("delete", help="delete an item, or one drawing / the sliced version / drawn frames of it "
+                                       "(to the Recycle Bin)")
+    ad.add_argument("item")
+    ad.add_argument("--project", required=True)
+    ad_what = ad.add_mutually_exclusive_group()
+    ad_what.add_argument("--drawing", type=int, default=None, help="one drawing of the history (its number)")
+    ad_what.add_argument("--current", action="store_true", help="the drawing on screen")
+    ad_what.add_argument("--sliced", action="store_true", help="the character's sliced version")
+    ad_what.add_argument("--frames", default=None, help="one set of drawn frames (its folder name)")
+    ad.set_defaults(func=cmd_asset_delete)
     al = ast.add_parser("list", help="the project's items")
     al.add_argument("--project", required=True)
     al.set_defaults(func=cmd_asset_list)
@@ -1284,6 +1350,9 @@ def build_parser() -> argparse.ArgumentParser:
     pi.add_argument("--model", default=None,
                     help="base model for this project's generation and style training (e.g. sdxl, flux2-klein-4b)")
     pi.set_defaults(func=cmd_project_init)
+    pd = proj.add_parser("delete", help="move a project folder to the Recycle Bin")
+    pd.add_argument("path")
+    pd.set_defaults(func=cmd_project_delete)
 
     st = sub.add_parser("style", help="train and manage styles").add_subparsers(dest="style_cmd", required=True)
     ds = st.add_parser("dataset", help="training images").add_subparsers(dest="dataset_cmd", required=True)
@@ -1393,6 +1462,10 @@ def build_parser() -> argparse.ArgumentParser:
     ma_where.add_argument("--project")
     ma_where.add_argument("--out", help="folder")
     ma.set_defaults(func=cmd_motion_add)
+    mr = mo.add_parser("remove", help="delete animations from a project (to the Recycle Bin)")
+    mr.add_argument("names", nargs="+", help="file names in <project>/clips (walk or walk.json)")
+    mr.add_argument("--project", required=True)
+    mr.set_defaults(func=cmd_motion_remove)
 
     char = sub.add_parser("character", help="character part sheets").add_subparsers(
         dest="character_cmd", required=True

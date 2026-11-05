@@ -166,3 +166,17 @@ def write_credits(clip_paths: list[Path], dest: Path) -> Path | None:
     dest.write_text(head + "\n\n".join(lines) + "\n", encoding="utf-8")
     return dest
 
+
+
+def delete_clip(clip: str | Path) -> list[Path]:
+    """Move a project animation and the files made with it (preview GIF, BVH, motion info) to the Recycle Bin."""
+    from ggs.trash import move_to_trash
+
+    clip = Path(clip)
+    if not clip.is_file():
+        raise FileNotFoundError(f"no animation {clip}")
+    gone = [f for f in (clip, clip.with_suffix(".gif"), clip.with_suffix(".bvh"), clip.with_suffix(".motion.json"))
+            if f.is_file()]
+    for f in gone:
+        move_to_trash(f)
+    return gone

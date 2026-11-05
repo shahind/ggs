@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
@@ -383,7 +382,10 @@ class ProjectTab(QWidget):
         self.list.currentItemChanged.connect(self._pick)
         lay.addWidget(self.list, 3)
         self.preview = Preview()
-        rm = QPushButton("Remove")
+        from ggs.ui.errors import trash_icon
+
+        rm = QPushButton("Delete")
+        rm.setIcon(trash_icon(self))
         rm.clicked.connect(self._remove)
         self.preview.buttons.addWidget(rm)
         hint = QLabel("To put an animation on a character, open the character and use its Animate tab.")
@@ -435,12 +437,16 @@ class ProjectTab(QWidget):
         it = self.list.currentItem()
         if it is None:
             return
-        p = Path(it.data(ROLE))
-        if QMessageBox.question(self, "GGS", f"Remove the animation '{it.text()}' from this project?") != \
-                QMessageBox.StandardButton.Yes:
+        from ggs.rig.library import delete_clip
+        from ggs.ui.errors import confirm_delete, show_error
+
+        if not confirm_delete(self, f"the animation '{it.text()}'", "Characters already exported keep it."):
             return
-        for f in (p, p.with_suffix(".gif"), p.with_suffix(".bvh"), p.with_suffix(".motion.json")):
-            f.unlink(missing_ok=True)
+        self.preview.show_gif(it.text(), None)  # the preview GIF is open while it plays
+        try:
+            delete_clip(it.data(ROLE))
+        except OSError as exc:
+            show_error(self, str(exc), "Not deleted")
         self.page.refresh_project(True)
 
 

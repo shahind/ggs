@@ -81,7 +81,7 @@ def test_export_several_animations(hero, tmp_path):
 
     ch = make_slices(hero, "Hero", "side_simple", enforce_vram=False).character
     clips = [str(library_clip(n)) for n in ("walk", "punch")]
-    if not all(map(lambda c: __import__("pathlib").Path(c).exists(), clips)):
+    if not all(__import__("pathlib").Path(c).exists() for c in clips):
         pytest.skip("motion library not built (tools/make_motion_library.py)")
     assert main(["export", *clips, "--character", str(ch), "--format", "unity", "--out", str(tmp_path / "u")]) == 0
     assert set(json.loads((tmp_path / "u" / "rig.json").read_text(encoding="utf-8"))["clips"]) == {"walk", "punch"}
@@ -98,7 +98,7 @@ def test_drawn_frames_from_design(hero):
         pytest.skip("motion library not built")
     sheet = pose_preview(clip, 6)
     assert sheet.size == (4 * 256, 2 * 384)
-    out, results = make_frames(hero, "Hero", clip, frames=6, enforce_vram=False)
+    out, _results = make_frames(hero, "Hero", clip, frames=6, enforce_vram=False)
     rep = json.loads((out / "report.json").read_text(encoding="utf-8"))
     assert rep["frames"] == 6 and len(list((out / "frames").glob("*.png"))) == 6
     assert (out / "walk_sheet.png").exists() and (out / "poses.png").exists()

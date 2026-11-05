@@ -98,32 +98,39 @@ class JobQueue(QObject):
         self._proc = proc
         proc.start(cmd[0], cmd[1:])
 
-    def _read(self) -> None:
-        data = bytes(self._proc.readAllStandardOutput()).decode("utf-8", "replace")
+    def _read(self, final: bool = False) -> None:
+        data = bytes(self._proc.readAllStandardOutput()).decode("utf-8", "replace") if self._proc else ""
         self._buf += data.replace("\r", "\n")
         *lines, self._buf = self._buf.split("\n")
+        if final:  # the process ended: what is left is a whole line too
+            lines.append(self._buf)
+            self._buf = ""
         for ln in lines:
-            if ln.strip() and "it/s]" not in ln and "Loading weights" not in ln:
-                m = PROGRESS.match(ln.strip())
-                if m:
-                    self.progress.emit(int(m.group(1)))
-                    if self._job and self._job.on_line:
-                        self._job.on_line(ln)
-                    continue
+            if not ln.strip():
+                continue
+            # markers first: a model-loading bar (stderr, no newline yet) can share the line with them
+            m = PROGRESS.search(ln)
+            if m:
+                self.progress.emit(int(m.group(1)))
+                if self._job and self._job.on_line:
+                    self._job.on_line(ln[m.start():])
+                continue
+            st = stage_text(ln)
+            if st:
                 if self._job:
                     self._job.output.append(ln)
-                st = stage_text(ln)
-                if st:
-                    self.stage.emit(st)
-                    continue
-                self.line.emit(ln)
-                if self._job and self._job.on_line:
-                    self._job.on_line(ln)
+                self.stage.emit(st)
+                continue
+            if "it/s]" in ln or "Loading weights" in ln:
+                continue
+            if self._job:
+                self._job.output.append(ln)
+            self.line.emit(ln)
+            if self._job and self._job.on_line:
+                self._job.on_line(ln)
 
     def _step_done(self, code: int, _status) -> None:
-        if self._buf.strip():
-            self.line.emit(self._buf)
-            self._buf = ""
+        self._read(final=True)  # output that arrived with the end of the process
         job = self._job
         job.exit_code = code
         ok = code in job.exit_ok
