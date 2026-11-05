@@ -1,7 +1,7 @@
-"""GGS desktop app (M9): ``python -m ggs ui`` or ``ggs-studio``.
+"""GGS desktop app: ``python -m ggs ui`` or ``ggs-studio``.
 
-A thin shell over the CLI: pages build ``ggs`` commands, a queue runs them one at a time, and the log shows
-everything they print. Project folders are the same as the CLI's.
+Start screen (projects) -> project window (hierarchy tree + chat-centred workspace). Every action is a ``ggs``
+command run by a one-at-a-time queue, so the app behaves exactly like the CLI and each job gets the whole GPU.
 """
 
 from __future__ import annotations
@@ -9,110 +9,86 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt
-from PySide6.QtWidgets import (
-    QApplication,
-    QDockWidget,
-    QHBoxLayout,
-    QLabel,
-    QListWidget,
-    QMainWindow,
-    QPushButton,
-    QStackedWidget,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtCore import QSettings
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QStackedWidget
 
 from ggs import __version__
-from ggs.ui.jobs import JobQueue
-from ggs.ui.pages import (
-    AnimatePage,
-    AppState,
-    CharactersPage,
-    GeneratePage,
-    ProjectPage,
-    StylesPage,
-    SystemPage,
-)
-from ggs.ui.widgets import LogView
-
-PAGES = [("Project", ProjectPage), ("Generate", GeneratePage), ("Characters", CharactersPage),
-         ("Animate", AnimatePage), ("Styles", StylesPage), ("System", SystemPage)]
+from ggs.ui import commands as C
+from ggs.ui.jobs import Job, JobQueue
+from ggs.ui.start import NewProjectDialog, StartScreen, remember
+from ggs.ui.theme import QSS
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, project: Path | None = None):
+    def __init__(self, project: Path | None = None, settings: QSettings | None = None):
         super().__init__()
         self.setWindowTitle(f"GGS - Game Graphic Studio {__version__}")
-        self.resize(1280, 860)
+        self.resize(1320, 860)
+        self.settings = settings or QSettings("GGS", "GameGraphicStudio")
         self.queue = JobQueue(self)
-        self.state = AppState(self.queue)
-        self.settings = QSettings("GGS", "GameGraphicStudio")
-
-        self.nav = QListWidget()
-        self.nav.setFixedWidth(150)
         self.stack = QStackedWidget()
-        self.pages = {}
-        for name, cls in PAGES:
-            page = cls(self.state)
-            self.pages[name] = page
-            self.nav.addItem(name)
-            self.stack.addWidget(page)
-        self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
-        self.nav.setCurrentRow(0)
-        central = QWidget()
-        h = QHBoxLayout(central)
-        h.addWidget(self.nav)
-        h.addWidget(self.stack, 1)
-        self.setCentralWidget(central)
+        self.setCentralWidget(self.stack)
+        self.start = StartScreen(self.settings)
+        self.start.open_project.connect(self.open_project)
+        self.start.new_project.connect(self.new_project)
+        self.stack.addWidget(self.start)
+        self.view = None
+        if project and (Path(project) / ".ggs" / "project.yaml").exists():
+            self.open_project(Path(project))
 
-        self.log = LogView()
-        self.job_label = QLabel("Idle")
-        cancel = QPushButton("Cancel job")
-        cancel.clicked.connect(self.queue.cancel)
-        dock_w = QWidget()
-        v = QVBoxLayout(dock_w)
-        top = QHBoxLayout()
-        top.addWidget(self.job_label, 1)
-        top.addWidget(cancel)
-        v.addLayout(top)
-        v.addWidget(self.log)
-        dock = QDockWidget("Jobs and log", self)
-        dock.setObjectName("log")
-        dock.setWidget(dock_w)
-        dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
-        self.resizeDocks([dock], [170], Qt.Orientation.Vertical)
+    def open_project(self, project: Path) -> None:
+        from ggs.ui.project_view import ProjectView
 
-        self.queue.line.connect(self.log.append_line)
-        self.queue.started.connect(lambda t: self.job_label.setText(f"Running: {t}"
-                                                                    + (f" (+{self.queue.pending()} queued)"
-                                                                       if self.queue.pending() else "")))
-        self.queue.busy_changed.connect(lambda b: None if b else self.job_label.setText("Idle"))
-        self.state.project_changed.connect(self._remember)
+        remember(self.settings, project)
+        if self.view is not None:
+            self.stack.removeWidget(self.view)
+            self.view.deleteLater()
+        self.view = ProjectView(self.queue, project)
+        self.view.back.connect(self.show_start)
+        self.stack.addWidget(self.view)
+        self.stack.setCurrentWidget(self.view)
+        self.setWindowTitle(f"GGS - {project.name}")
 
-        start = project or (Path(self.settings.value("last_project")) if self.settings.value("last_project")
-                            else None)
-        if start and (Path(start) / ".ggs" / "project.yaml").exists():
-            self.state.set_project(Path(start))
+    def show_start(self) -> None:
+        self.start.refresh()
+        self.stack.setCurrentWidget(self.start)
+        self.setWindowTitle(f"GGS - Game Graphic Studio {__version__}")
 
-    def _remember(self) -> None:
-        if self.state.project:
-            self.settings.setValue("last_project", str(self.state.project))
-            self.setWindowTitle(f"GGS - {self.state.project.name}")
+    def new_project(self) -> None:
+        dlg = NewProjectDialog(self)
+        dlg.created.connect(self.create_project)
+        dlg.exec()
+
+    def create_project(self, folder: Path, name: str, model: str) -> None:
+        job = Job("new project", [C.project_init(folder, name, model)])
+
+        def done(ok: bool) -> None:
+            if ok:
+                self.open_project(folder)
+            else:
+                from ggs.ui.errors import friendly_error
+
+                QMessageBox.information(self, "GGS", friendly_error("\n".join(job.output)))
+
+        job.done = done
+        self.queue.submit(job)
 
     def closeEvent(self, event) -> None:
+        if self.queue.busy and QMessageBox.question(
+                self, "GGS", "Something is still being made. Stop it and quit?") != QMessageBox.StandardButton.Yes:
+            event.ignore()
+            return
         self.queue.cancel()
         super().closeEvent(event)
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv if argv is None else argv)
-    project = None
-    if "--project" in argv:
-        project = Path(argv[argv.index("--project") + 1])
+    project = Path(argv[argv.index("--project") + 1]) if "--project" in argv else None
     app = QApplication.instance() or QApplication(argv)
     app.setApplicationName("GGS")
+    app.setStyle("Fusion")
+    app.setStyleSheet(QSS)
     win = MainWindow(project)
     win.show()
     return app.exec()

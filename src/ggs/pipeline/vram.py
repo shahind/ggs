@@ -9,6 +9,7 @@ Works without torch/CUDA: then it only records wall time.
 from __future__ import annotations
 
 import gc
+import os
 import time
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
@@ -51,6 +52,8 @@ class Stages:
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
             base = torch.cuda.memory_allocated() / 2**30
+        if os.environ.get("GGS_PROGRESS"):  # the desktop app turns these into a progress bar
+            print(f"@stage {name}", flush=True)
         t0 = time.perf_counter()
         try:
             yield

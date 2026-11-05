@@ -789,6 +789,67 @@ def cmd_ui(args: argparse.Namespace) -> int:
     return ui_main(["ggs", *(["--project", args.project] if args.project else [])])
 
 
+def cmd_asset_new(args: argparse.Namespace) -> int:
+    from ggs.items import ItemError, ItemSettings, create
+
+    try:
+        rec, d = create(Path(args.project), args.asset_class, args.name, args.describe or "",
+                        ItemSettings(size=args.size, style=args.style))
+    except (ItemError, ValueError, OSError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    print(f"created {rec.asset_class}/{rec.name} -> {d}")
+    return 0
+
+
+def cmd_asset_gen(args: argparse.Namespace) -> int:
+    from ggs.items import ItemError, friendly, generate
+    from ggs.pipeline.models import MissingModelError
+    from ggs.pipeline.vram import VramBudgetError
+
+    profile = args.profile or profile_for(detect_vram_gb())
+    try:
+        rec, new = generate(Path(args.project), args.item, action=args.action, text=args.text or "",
+                            count=args.count, seed=args.seed, profile=profile, model=args.model,
+                            enforce_vram=not args.no_vram_check)
+    except (ItemError, MissingModelError, VramBudgetError, ValueError, OSError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    except ImportError as exc:
+        print(f'ERROR: {exc}. Install the GPU stack: see README ("gpu" extra).', file=sys.stderr)
+        return 1
+    for v in new:
+        state = "OK" if v.passed else "QA FAILED: " + friendly(v.failures)
+        print(f"v{v.n:03d} (seed {v.seed}): {state}  {v.file}")
+    print(f"current version: v{rec.current:03d}" if rec.current else "no usable version yet")
+    return 0 if any(v.passed for v in new) else 2
+
+
+def cmd_asset_list(args: argparse.Namespace) -> int:
+    from ggs.items import list_items
+
+    rows = list_items(Path(args.project))
+    for rec, d in rows:
+        cur = f"v{rec.current:03d}" if rec.current else "-"
+        print(f"{rec.asset_class:12} {rec.name:28} {len(rec.versions):3} versions, current {cur}  ({d})")
+    if not rows:
+        print("no items yet")
+    return 0
+
+
+def cmd_asset_export(args: argparse.Namespace) -> int:
+    from ggs.items import ItemError, export_item
+
+    try:
+        out = export_item(Path(args.project), args.item, Path(args.out) if args.out else None, args.version,
+                          args.size)
+    except (ItemError, OSError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    print(f"exported {out}")
+    return 0
+
+
 def cmd_clip_loop(args: argparse.Namespace) -> int:
     from ggs.rig.clip import load_clip
     from ggs.rig.cliptools import ClipError, cut_loop, find_loop
@@ -920,6 +981,39 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument("--no-vram-check", action="store_true", help="do not fail on VRAM budget overruns")
     gen.add_argument("--debug", action="store_true", help="also save the raw render and matte per asset")
     gen.set_defaults(func=cmd_generate)
+
+    ast = sub.add_parser("asset", help="named project items: create, generate (chat actions), list, export")
+    ast = ast.add_subparsers(dest="asset_cmd", required=True)
+    an = ast.add_parser("new", help="create a named item in a project")
+    an.add_argument("name")
+    an.add_argument("--class", dest="asset_class", required=True, choices=available_recipes())
+    an.add_argument("--project", required=True)
+    an.add_argument("--describe", default="", help="what it is (used by the first generation)")
+    an.add_argument("--size", default="medium", choices=["small", "medium", "large", "full"],
+                    help="export size: small 128, medium 256, large 512 px (longest side), full")
+    an.add_argument("--style", default=None)
+    an.set_defaults(func=cmd_asset_new)
+    ag = ast.add_parser("gen", help="run a chat action on an item: new, refine, regenerate, variations")
+    ag.add_argument("item", help="item name, or <class>/<name>")
+    ag.add_argument("--project", required=True)
+    ag.add_argument("--action", default="new", choices=["new", "refine", "regenerate", "variations"])
+    ag.add_argument("--text", default="", help="new: the description; refine: what to change")
+    ag.add_argument("--count", type=int, default=3, help="variations: how many")
+    ag.add_argument("--seed", type=int, default=None, help="advanced: fix the seed")
+    ag.add_argument("--model", default=None)
+    ag.add_argument("--profile", choices=["standard", "lite"], default=None)
+    ag.add_argument("--no-vram-check", action="store_true")
+    ag.set_defaults(func=cmd_asset_gen)
+    al = ast.add_parser("list", help="the project's items")
+    al.add_argument("--project", required=True)
+    al.set_defaults(func=cmd_asset_list)
+    ae2 = ast.add_parser("export", help="copy an item's current version to <project>/exports at its size")
+    ae2.add_argument("item")
+    ae2.add_argument("--project", required=True)
+    ae2.add_argument("--version", type=int, default=None)
+    ae2.add_argument("--size", default=None, choices=["small", "medium", "large", "full"])
+    ae2.add_argument("--out", default=None)
+    ae2.set_defaults(func=cmd_asset_export)
 
     proj = sub.add_parser("project", help="project folders").add_subparsers(dest="project_cmd", required=True)
     pi = proj.add_parser("init", help="make a folder a GGS project (.ggs/)")

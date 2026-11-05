@@ -148,6 +148,30 @@ def style_install(package: Path, project: Path | None) -> list[str]:
     return a
 
 
+def asset_new(project: Path, asset_class: str, name: str, describe: str = "", size: str = "medium",
+              style: str | None = None) -> list[str]:
+    a = [*GGS, "asset", "new", name, "--class", asset_class, "--project", str(project), "--describe", describe,
+         "--size", size]
+    _opt(a, "--style", style)
+    return a
+
+
+def asset_gen(project: Path, item: str, action: str, text: str = "", *, count: int = 3, seed: int | None = None,
+              model: str | None = None) -> list[str]:
+    a = [*GGS, "asset", "gen", item, "--project", str(project), "--action", action, "--count", str(count)]
+    _opt(a, "--text", text)
+    _opt(a, "--seed", seed)
+    _opt(a, "--model", model)
+    return a
+
+
+def asset_export(project: Path, item: str, size: str | None = None, version: int | None = None) -> list[str]:
+    a = [*GGS, "asset", "export", item, "--project", str(project)]
+    _opt(a, "--size", size)
+    _opt(a, "--version", version)
+    return a
+
+
 def doctor() -> list[str]:
     return [*GGS, "doctor"]
 

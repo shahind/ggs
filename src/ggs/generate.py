@@ -100,7 +100,8 @@ def process(rgb_img, alpha_img, recipe: Recipe):
 def run_recipe(recipe: Recipe, description: str, out: Path, *, model: str | None = None, seeds: list[int],
                profile: str = "lite", style: str = "", keep_failed: bool = False, enforce_vram: bool = True,
                size: tuple[int, int] | None = None, debug: bool = False, style_ref: str | None = None,
-               style_weight: float | None = None, project: Path | None = None) -> tuple[list[AssetResult], dict]:
+               style_weight: float | None = None, project: Path | None = None, reference: list | None = None,
+               prompt_is_final: bool = False) -> tuple[list[AssetResult], dict]:
     """``style`` = extra style words for the prompt; ``style_ref`` = a trained style (installed name or
     .ggsstyle path) whose LoRA is loaded and whose trigger word starts the prompt."""
     from PIL import Image
@@ -125,12 +126,15 @@ def run_recipe(recipe: Recipe, description: str, out: Path, *, model: str | None
                          keep_failed=keep_failed, enforce_vram=enforce_vram, size=size or recipe.size, debug=debug,
                          lora=lora, lora_scale=1.0 if style_weight is None else style_weight,
                          style_meta=style_meta)
-    prompt = recipe.prompt(description, style, model)
+    # an edit instruction (``prompt_is_final``) goes to the model as written, with the image as reference
+    prompt = (f"{style}, {description}" if style else description) if prompt_is_final else recipe.prompt(
+        description, style, model)
     stages = Stages(profile=profile, enforce=enforce_vram)
     t0 = time.perf_counter()
     gen, matter = build_backends(recipe, model, profile)
+    extra = {"reference": reference} if reference else {}
     images = gen.generate(prompt, seeds, width, height, stages, lora=lora,
-                          lora_scale=1.0 if style_weight is None else style_weight)
+                          lora_scale=1.0 if style_weight is None else style_weight, **extra)
     alphas = matter.alphas(images, stages)
 
     out = Path(out)

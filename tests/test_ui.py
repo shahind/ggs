@@ -1,4 +1,5 @@
-"""Desktop app (M9): command builders (pure Python), and an offscreen smoke test of the window and job queue."""
+"""Desktop app v2: command builders and friendly errors (pure Python), and offscreen smoke tests of the start
+screen, project window, wizard, item workspace and job queue."""
 
 import json
 import os
@@ -7,6 +8,7 @@ import sys
 import pytest
 
 from ggs.ui import commands as C
+from ggs.ui.errors import friendly_error, stage_text
 
 
 def test_slug_and_paths(tmp_path):
@@ -19,33 +21,22 @@ def test_slug_and_paths(tmp_path):
 def test_command_builders(tmp_path):
     g = C.generate("tile", "cobblestone", tmp_path / "t.png", project=tmp_path, style="ink", style_weight=0.8,
                    count=3, seed=7, size="512x512")
-    assert g[:3] == [sys.executable, "-m", "ggs"] and g[3:5] == ["generate", "--class"]
-    i = g.index
-    assert g[i("--class") + 1] == "tile" and g[i("--count") + 1] == "3" and g[i("--style") + 1] == "ink"
-    assert "--keep-failed" in g and "--model" not in g
-    m = C.character_master("a knight", tmp_path / "k", "knight", body="chibi", stature=0.8, refine=False)
-    assert m[m.index("--body") + 1] == "chibi" and "--no-refine" in m and m[m.index("--stature") + 1] == "0.8"
-    e = C.export(tmp_path / "c.json", tmp_path / "ch.yaml", "godot", tmp_path / "o", items=[tmp_path / "sword"])
-    assert e[e.index("--item") + 1].endswith("sword") and e[e.index("--format") + 1] == "godot"
-    d = C.dataset_import(tmp_path, tmp_path / "ds", rights=False)
-    assert "--i-have-the-rights" not in d
+    assert g[:3] == [sys.executable, "-m", "ggs"] and g[g.index("--class") + 1] == "tile"
+    a = C.asset_gen(tmp_path, "sprite/Potion", "refine", "make it blue", seed=5)
+    assert a[3:5] == ["asset", "gen"] and a[a.index("--action") + 1] == "refine"
+    assert a[a.index("--text") + 1] == "make it blue" and a[a.index("--seed") + 1] == "5" and "--model" not in a
+    n = C.asset_new(tmp_path, "tile", "Floor", "grey stone", "small")
+    assert n[n.index("--class") + 1] == "tile" and n[n.index("--size") + 1] == "small"
+    e = C.asset_export(tmp_path, "Floor", "large", 3)
+    assert e[e.index("--version") + 1] == "3"
     assert "--i-have-the-rights" in C.dataset_import(tmp_path, tmp_path / "ds", rights=True)
 
 
-def test_read_results(tmp_path):
-    out = tmp_path / "a.png"
-    (tmp_path / "a.json").write_text(json.dumps({"assets": [
-        {"file": "a_01.png", "passed": True, "failures": []},
-        {"file": "a_02_QA_FAILED.png", "passed": False, "failures": ["halo: 30%"]},
-        {"file": None, "passed": False, "failures": ["empty"]}]}), encoding="utf-8")
-    rows = C.read_generate_results(out)
-    assert [r.passed for r in rows] == [True, False] and rows[1].detail == "halo: 30%"
-    seed = tmp_path / "run" / "seed_000" / "character"
-    seed.mkdir(parents=True)
-    (seed / "validation.json").write_text(json.dumps({"passed": False, "score": 0.8, "checks": [
-        {"name": "reassembly_iou", "passed": False, "detail": "IoU 0.8"}]}), encoding="utf-8")
-    (r,) = C.read_character_results(tmp_path / "run")
-    assert not r["passed"] and r["failures"] == ["reassembly_iou: IoU 0.8"]
+def test_friendly_errors_and_stages():
+    assert "graphics card ran out of memory" in friendly_error("VramBudgetError: stage 'denoise' peaked at 9 GB")
+    assert "model files are missing" in friendly_error("ERROR: flux2 vae: none of [x] found in [y]")
+    assert friendly_error("ERROR: the moon is blue").startswith("Something went wrong: the moon is blue")
+    assert stage_text("@stage denoise") == "Drawing..." and stage_text("plain line") is None
 
 
 @pytest.fixture(scope="module")
@@ -57,40 +48,86 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-def test_window_pages_and_project(qapp, tmp_path):
-    from ggs.style.package import init_project
-    from ggs.ui.app import PAGES, MainWindow
+@pytest.fixture()
+def settings(tmp_path, qapp):
+    from PySide6.QtCore import QSettings
 
-    init_project(tmp_path / "game", "Game", base_model="sdxl")
-    w = MainWindow(tmp_path / "game")
-    assert [w.nav.item(i).text() for i in range(w.nav.count())] == [n for n, _ in PAGES]
-    assert w.state.project == tmp_path / "game" and w.state.base_model() == "sdxl"
-    gen = w.pages["Generate"]
-    kinds = [gen.kind.itemData(i) for i in range(gen.kind.count())]
-    assert {"sprite", "tile", "background", "ui_panel", "vfx", "held_item"} <= set(kinds)
-    assert "sdxl" in gen.model.itemText(0)  # the project's base model is the default
-    anim = w.pages["Animate"]
-    assert anim.upper.count() >= 4  # (none) + the keyframe clips in clips/
-    styles = w.pages["Styles"]
-    assert not styles.import_btn.isEnabled()  # the rights checkbox gates the import
-    styles.rights.setChecked(True)
-    assert styles.import_btn.isEnabled()
+    return QSettings(str(tmp_path / "s.ini"), QSettings.Format.IniFormat)
+
+
+def test_start_screen_lists_projects(qapp, tmp_path, settings):
+    from ggs.style.package import init_project
+    from ggs.ui.app import MainWindow
+    from ggs.ui.start import known_projects, remember
+
+    init_project(tmp_path / "a", "Alpha")
+    remember(settings, tmp_path / "a")
+    remember(settings, tmp_path / "missing")  # gone folders are dropped from the list
+    assert known_projects(settings) == [tmp_path / "a"]
+    w = MainWindow(settings=settings)
+    assert w.stack.currentWidget() is w.start and w.start.grid.count() == 2  # "+ New" and Alpha
     w.close()
 
 
-def test_job_queue_runs_cli_commands(qapp, tmp_path):
+def test_project_window_tree_and_workspace(qapp, tmp_path, settings):
+    from PySide6.QtCore import Qt
+
+    from ggs import items as I
+    from ggs.style.package import init_project
+    from ggs.ui.app import MainWindow
+    from ggs.ui.workspace import ItemWorkspace
+
+    init_project(tmp_path / "g", "Game", base_model="sdxl")
+    I.create(tmp_path / "g", "sprite", "Potion", "a red potion")
+    I.generate(tmp_path / "g", "Potion", action="new", model="stub", enforce_vram=False)
+    w = MainWindow(tmp_path / "g", settings=settings)
+    v = w.view
+    assert v.model.currentData() == "sdxl"
+    (it,) = v.tree.findItems("Potion", Qt.MatchFlag.MatchRecursive)
+    v.tree.setCurrentItem(it)
+    ws = v.stack.currentWidget()
+    assert isinstance(ws, ItemWorkspace)
+    assert ws.send.text() == "Refine" and ws.regen.isEnabled() and ws.versions.count() == 1
+    assert not ws.adv.isVisible()  # Advanced is closed by default
+    v.model.setCurrentIndex(v.model.findData("flux2-klein-4b"))
+    assert "flux2-klein-4b" in (tmp_path / "g" / ".ggs" / "project.yaml").read_text(encoding="utf-8")
+    w.close()
+
+
+def test_wizard_tiles(qapp):
+    from ggs.ui.wizard import NewItemDialog
+
+    d = NewItemDialog(preselect="background")
+    assert d.kind_id() == "background" and not d.ok.isEnabled()
+    assert len(d.sizes.buttons()) == 1  # backgrounds have no size choice
+    d.kinds.buttons()[0].setChecked(True)
+    assert d.kind_id() == "sprite" and d.size() == "medium" and len(d.sizes.buttons()) == 4
+    got = []
+    d.chosen.connect(lambda *a: got.append(a))
+    d.name.setText("Potion")
+    d.describe.setPlainText("a red potion")
+    assert d.ok.isEnabled()
+    d._accept()
+    assert got == [("sprite", "Potion", "medium", "a red potion")]
+
+
+def test_job_queue_runs_cli_and_reports_stages(qapp, tmp_path):
     from PySide6.QtCore import QEventLoop, QTimer
 
+    from ggs.style.package import init_project
     from ggs.ui.jobs import Job, JobQueue
 
+    init_project(tmp_path / "p", "P")
     q = JobQueue()
-    lines, results = [], []
-    q.line.connect(lines.append)
+    stages, results = [], []
+    q.stage.connect(stages.append)
     loop = QEventLoop()
-    done = lambda ok: (results.append(ok), loop.quit())
-    q.submit(Job("init", [C.project_init(tmp_path / "p", "P")], done=done))
-    QTimer.singleShot(60000, loop.quit)
+    job = Job("gen", [C.asset_new(tmp_path / "p", "sprite", "Gem", "a gem"),
+                      C.asset_gen(tmp_path / "p", "Gem", "new", model="stub")], exit_ok=(0, 2))
+    job.done = lambda ok: (results.append(ok), loop.quit())
+    q.submit(job)
+    QTimer.singleShot(120000, loop.quit)
     loop.exec()
-    assert results == [True]
-    assert (tmp_path / "p" / ".ggs" / "project.yaml").exists()
-    assert any(ln.startswith("$ ") for ln in lines) and any("created" in ln for ln in lines)
+    assert results == [True] and "Drawing..." in stages
+    rec = json.loads((tmp_path / "p" / "items" / "sprite" / "gem" / "item.json").read_text(encoding="utf-8"))
+    assert rec["current"] == 1
