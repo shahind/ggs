@@ -41,9 +41,13 @@ ROW = 256
 ENGINE_FORMATS = [("Godot", "godot"), ("Unity", "unity"), ("Defold", "defold"), ("Parts + JSON", "rig")]
 ANIM_FORMATS = [*ENGINE_FORMATS, ("GIF (one per animation)", "gif"), ("Animated PNG", "apng"),
                 ("WebP", "webp"), ("Sprite sheets", "sheet")]
+WARP_FORMATS = [("Sprite sheets + JSON (Godot, Unity, Defold)", "sheet"), ("Animated PNG", "apng"), ("WebP", "webp"),
+                ("GIF (one per animation)", "gif")]
 ADDED = re.compile(r"^added (.+\.json)\s*$")
-METHODS = [("Cut-out animation", ("The sliced pieces move like a puppet: any animation from the library, instantly, "
-                                 "and they stay editable in your engine.")),
+METHODS = [("Bend the drawing", ("The whole drawing bends with the skeleton: smooth elbows and knees, nothing cut "
+                                 "apart. Best for simple characters; exported as pictures or sprite sheets.")),
+           ("Cut-out pieces", ("The sliced pieces move like a puppet: any animation from the library, instantly, "
+                               "and they stay editable in your engine.")),
            ("Drawn frames", ("The drawing model draws the character in every frame of one animation: clothes and hair "
                             "move naturally; takes a few minutes per animation."))]
 
@@ -263,8 +267,14 @@ def preview_gif(character_yaml: Path, clip_path: Path, height: int = 230, second
     if out.exists():
         return out
     out.parent.mkdir(parents=True, exist_ok=True)
-    ch = load_character(character_yaml)
-    spec = load_rig_spec(rigs_dir() / f"{ch.spec.rig}.yaml")
+    warp = Path(character_yaml).name == "skin.json"
+    if warp:
+        from ggs.rig.skin import load_skin
+
+        skin = load_skin(character_yaml)
+    else:
+        ch = load_character(character_yaml)
+        spec = load_rig_spec(rigs_dir() / f"{ch.spec.rig}.yaml")
     clip = load_clip(clip_path)
     n = min(clip.frame_count, max(1, int(seconds * clip.fps)))
     if n < clip.frame_count:
@@ -273,7 +283,7 @@ def preview_gif(character_yaml: Path, clip_path: Path, height: int = 230, second
             "frame_count": n, "angles": cut, "local_angles": {k: v[:n] for k, v in clip.local_angles.items()},
             "root": clip.root.model_copy(update={"x": clip.root.x[:n], "y": clip.root.y[:n]}),
             "swaps": {k: v[:n] for k, v in clip.swaps.items()}})
-    frames, _ = ch.puppet(spec).render_clip(clip, height)
+    frames, _ = (skin if warp else ch.puppet(spec)).render_clip(clip, height)
     save_gif(frames, out, clip.fps, (255, 255, 255), True)
     return out
 
@@ -321,8 +331,8 @@ class SlicedTab(QWidget):
         lay = QHBoxLayout(self)
         left = QVBoxLayout()
         left.addWidget(_h("1. Pick a layout"))
-        left.addWidget(_muted("The character is drawn again with arms and legs apart and cut into these pieces. "
-                              "Each piece can then move on its own."))
+        left.addWidget(_muted("The character is drawn again with arms and legs apart, its joints are found, and it "
+                              "is cut into these pieces. The same drawing is used to bend it in one piece."))
         self.group = QButtonGroup(self)
         self.templates = load_templates()
         for i, t in enumerate(self.templates):
@@ -406,9 +416,9 @@ class SlicedTab(QWidget):
                                                if stale else "The pieces of your character. Animate them in the "
                                                "Animate tab, or export them below."))
         if ok and info.get("rough"):
-            self.status.setText("A rough cut: no try matched the drawing closely, so some pieces may show gaps "
-                                "when they move. Make it again for other tries, or simplify the design (long coats, "
-                                "skirts and capes are hard to cut).")
+            self.status.setText("A rough cut: the pieces do not rebuild the drawing exactly, so some may show gaps "
+                                "when they move. For a character like this, Animate > Bend the drawing usually looks "
+                                "better (it keeps the drawing in one piece). Or make it again for other tries.")
             self.status.setStyleSheet("color: #f0a040;")
         else:
             self.status.setStyleSheet("")
@@ -500,8 +510,10 @@ class AnimateTab(QWidget):
         self.about = _muted(METHODS[0][1])
         lay.addWidget(self.about)
         self.stack = QStackedWidget()
+        self.warp = CutoutPanel(self, warp=True)
         self.cutout = CutoutPanel(self)
         self.drawn = DrawnPanel(self)
+        self.stack.addWidget(self.warp)
         self.stack.addWidget(self.cutout)
         self.stack.addWidget(self.drawn)
         lay.addWidget(self.stack, 1)
@@ -512,12 +524,15 @@ class AnimateTab(QWidget):
         self.refresh()
 
     def refresh(self) -> None:
-        (self.cutout if self.stack.currentIndex() == 0 else self.drawn).refresh()
+        self.stack.currentWidget().refresh()
 
 
 class CutoutPanel(QWidget):
-    def __init__(self, tab: AnimateTab):
+    """Animations played by the sliced version: the cut-out puppet, or (``warp``) the drawing bent in one piece."""
+
+    def __init__(self, tab: AnimateTab, warp: bool = False):
         super().__init__()
+        self.warp = warp
         self.tab, self.ws = tab, tab.ws
         self.queue, self.project = tab.queue, tab.project
         outer = QVBoxLayout(self)
@@ -549,7 +564,7 @@ class CutoutPanel(QWidget):
         right.addWidget(self.stage, 1)
         row = QHBoxLayout()
         self.fmt = QComboBox()
-        for label, f in ANIM_FORMATS:
+        for label, f in (WARP_FORMATS if warp else ANIM_FORMATS):
             self.fmt.addItem(label, f)
         self.height = QSpinBox()
         self.height.setRange(32, 2048)
@@ -566,22 +581,27 @@ class CutoutPanel(QWidget):
         outer.addWidget(self.body, 1)
 
     def character(self) -> Path | None:
-        from ggs.rig.slices import sliced_character
+        from ggs.rig.slices import sliced_character, warp_skin
 
-        return sliced_character(self.ws.dir)
+        return warp_skin(self.ws.dir) if self.warp else sliced_character(self.ws.dir)
 
     def refresh(self) -> None:
         ch = self.character()
         side = False
         if ch is not None:
-            import yaml
+            if self.warp:
+                side = json.loads(ch.read_text(encoding="utf-8")).get("rig") == "humanoid_side_v1"
+            else:
+                import yaml
 
-            side = (yaml.safe_load(ch.read_text(encoding="utf-8")) or {}).get("rig") == "humanoid_side_v1"
+                side = (yaml.safe_load(ch.read_text(encoding="utf-8")) or {}).get("rig") == "humanoid_side_v1"
         self.need.setVisible(not side)
         self.body.setVisible(side)
         if ch is None:
-            self.need_text.setText("Cut-out animation moves the sliced pieces of your character. Make the sliced "
-                                   "version first (it takes a minute or two).")
+            self.need_text.setText(("Bending the drawing needs the sliced version (it finds the joints in a "
+                                    "drawing of your character with arms and legs apart). " if self.warp else
+                                    "Cut-out animation moves the sliced pieces of your character. ") +
+                                   "Make the sliced version first (it takes a few minutes).")
         elif not side:
             self.need_text.setText("This sliced version is front view; the animations are side view. Make a side "
                                    "view sliced version to animate it.")
@@ -615,6 +635,8 @@ class CutoutPanel(QWidget):
         fmt = self.fmt.currentData()
         ch = self.character()
         base = C.exports_dir(self.project) / _out_name(self.ws.rec.name)
+        if self.warp:
+            base = base / "bent"
         engine = fmt in ("godot", "unity", "defold", "rig")
         self.movie.setVisible(False)
         self.stage.setVisible(True)

@@ -63,7 +63,7 @@ Target engines: **Unity, Godot and Defold** (all three, every exporter).
 
 ```
 CLAUDE.md            this file
-docs/                ARCHITECTURE, ASSET_CLASSES, RIG_SPEC_V1, CLIP_FORMAT_V1, EXPORT_FORMATS, STYLE_TRAINING, PART_CUTTER,
+docs/                ARCHITECTURE, ASSET_CLASSES, RIG_SPEC_V1, CLIP_FORMAT_V1, EXPORT_FORMATS, STYLE_TRAINING, PART_CUTTER, ANIMATION_V3,
                      MODELS_AND_LICENSES, LICENSE_REVIEW, ROADMAP, KICKOFF
 rigs/                machine-readable rig specs (YAML) — source of truth for bones/parts/sockets
 models/registry.yaml model/LoRA/motion registry with license + VRAM metadata
@@ -125,6 +125,7 @@ python -m ggs asset accept Hero --project <dir>                                #
 python -m ggs asset delete Hero --project <dir> [--current|--drawing N|--sliced|--frames walk]  # to the Recycle Bin
 python -m ggs motion remove wave --project <dir>; python -m ggs project delete <dir>
 python -m ggs character slice Hero --project <dir> --template side_simple      # sliced version (rigs/slice_templates.yaml)
+python -m ggs export walk.json --character <item>/sliced/warp/skin.json --format sheet --out walk.png  # warp: the drawing bent
 python -m ggs character frames Hero --project <dir> --clip motions/clips/walk.json --frames 8   # drawn frames
 python -m ggs export walk.json punch.json --character <item>/sliced/character.yaml --format godot --out build/hero
 python -m ggs export --character <item>/sliced/character.yaml --format unity --out build/parts  # parts only, no clips

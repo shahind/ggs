@@ -122,6 +122,58 @@ def sliced_info(item_dir: Path) -> dict:
         return {}
 
 
+def warp_skin(item_dir: Path) -> Path | None:
+    """The item's warp rig (sliced/warp/skin.json), made with the sliced version."""
+    p = sliced_dir(item_dir) / "warp" / "skin.json"
+    return p if p.exists() else None
+
+
+def fit_masters(masters: list[Path], rig, model: str, stages) -> bool:
+    """Move each master's skeleton onto the joints found in its drawing (ViTPose). Skipped for the stub model,
+    for rigs other than the side view, and when the joint finder is not downloaded (the guide's joints are
+    used then). Returns whether the joints were fitted."""
+    from PIL import Image
+
+    from ggs.pipeline.models import MissingModelError
+    from ggs.rig.joints import detect_keypoints, fit_master
+    from ggs.rig.master import load_master
+
+    if model == "stub" or rig.view != "side" or not masters:
+        return False
+    try:
+        kps = detect_keypoints([Image.fromarray(load_master(m)[1], "RGBA") for m in masters], stages=stages)
+    except (MissingModelError, OSError) as exc:
+        print(f"joint finder not used ({exc}); cutting along the guide")
+        return False
+    for m, kp in zip(masters, kps):
+        fit_master(m, kp, rig)
+    return True
+
+
+def make_warp(master_json: Path, rig, out_dir: Path) -> Path:
+    """Build and save the warp rig of a (fitted) master."""
+    from PIL import Image
+
+    from ggs.rig.joints import bone_widths
+    from ggs.rig.master import load_master
+    from ggs.rig.skin import build_skin
+
+    spec, master, labels = load_master(master_json)
+    guide_labels = labels
+    guide_copy = Path(master_json).parent / "guide_labels_guide.png"
+    if guide_copy.exists():  # widths come from the guide's own shapes
+        import numpy as np
+
+        guide_labels = np.asarray(Image.open(guide_copy).convert("L")).astype(np.int16) - 1
+    widths = spec.fit.get("widths") or bone_widths(guide_labels, rig, spec.joints)
+    image = Image.fromarray(master, "RGBA")
+    skin = build_skin(rig, image, spec.joints, widths, spec.height_px)
+    k = skin.height_px / spec.height_px
+    if k < 1.0:
+        image = image.resize((round(image.width * k), round(image.height * k)), Image.LANCZOS)
+    return skin.save(out_dir, image)
+
+
 def make_slices(project: Path, ref: str, template: str, *, seeds: list[int] | None = None, profile: str = "lite",
                 enforce_vram: bool = True) -> SliceResult:
     """Draw the item's accepted design in the template's pose, cut it, keep the first try that validates."""
@@ -161,7 +213,7 @@ def make_slices(project: Path, ref: str, template: str, *, seeds: list[int] | No
         style, weight = f"{meta.trigger}, ", drawing.get("style_weight") or meta.recommended_weight
     seeds = seeds or [drawing["seed"] + i for i in range(3)]
     view_words = "side view facing right" if view == "side" else "front view facing the viewer, symmetrical T-pose"
-    progress.start(f"slices:{model}", ["encode", "denoise", "matte", "cut"] +
+    progress.start(f"slices:{model}", ["encode", "denoise", "matte", "joints", "cut"] +
                    (["denoise", "matte"] if t.refine else []))
     recipe = load_recipe("sprite")
     gen, matter = build_backends(recipe, model, profile)
@@ -188,12 +240,16 @@ def make_slices(project: Path, ref: str, template: str, *, seeds: list[int] | No
         shutil.rmtree(work)
     tries, best = [], None
     spec0 = guide.spec.model_copy(update={"body": body.model_dump(), "prompt": prompt, "model": model})
+    masters = []
+    for sd, img, alpha in zip(seeds, images, alphas):
+        rgba, _, _ = real_rgba(img, alpha, recipe.post.alpha_low, recipe.post.alpha_high)
+        folder = work / f"seed_{sd:06d}"
+        masters.append((sd, folder, save_master(folder, spec0.model_copy(update={"seed": sd}),
+                                                Image.fromarray(rgba, "RGBA"), guide)))
+        img.save(folder / "master_raw.png")
+    fitted = fit_masters([m for _, _, m in masters], rig, model, stages)
     with stages.stage("cut"):  # CPU: cut every try into pieces and check it (the longest part after drawing)
-        for sd, img, alpha in zip(seeds, images, alphas):
-            rgba, _, _ = real_rgba(img, alpha, recipe.post.alpha_low, recipe.post.alpha_high)
-            folder = work / f"seed_{sd:06d}"
-            master = save_master(folder, spec0.model_copy(update={"seed": sd}), Image.fromarray(rgba, "RGBA"), guide)
-            img.save(folder / "master_raw.png")
+        for sd, folder, master in masters:
             outcome = cut_master(master, rig, folder / "character", rec.name)
             fails = [f"{c.name}: {c.detail}" for c in outcome.report.checks if not c.passed]
             tries.append({"seed": sd, "passed": outcome.report.passed, "score": round(outcome.report.score, 4),
@@ -216,7 +272,13 @@ def make_slices(project: Path, ref: str, template: str, *, seeds: list[int] | No
         for f in best.iterdir():
             if f.is_file():
                 shutil.copy2(f, out / f.name)
+    # the warp rig (bend the whole drawing): from the try that was cut best, else the first one
+    warp = None
+    if rig.view == "side" and tries:
+        pick = best.parent if best is not None else Path(max(tries, key=lambda t: t["score"])["folder"])
+        warp = make_warp(pick / "master.json", rig, out / "warp")
     (out / "slices.json").write_text(json.dumps({
         "format": "ggs.slices", "version": 1, "template": t.id, "rig": rig.id, "design": rec.accepted,
-        "passed": best is not None and not rough, "rough": rough, "tries": tries}, indent=1), encoding="utf-8")
+        "passed": best is not None and not rough, "rough": rough, "tries": tries, "joints_fitted": fitted,
+        "warp": "warp/skin.json" if warp else None}, indent=1), encoding="utf-8")
     return SliceResult(out / "character.yaml" if best is not None else None, tries, rough)

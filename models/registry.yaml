@@ -138,6 +138,17 @@ entries:
     notes: "Model card header says MIT (checked 2026-11-03). Runs at 1024x1024, ~1.6 GB peak in fp16.
       Its remote code needs einops, kornia, timm. RMBG-2.0 (built on it) is CC BY-NC, do not use."
 
+  - id: vitpose-base-simple
+    kind: segmentation
+    name: ViTPose base (simple decoder), COCO 17 body keypoints
+    license: Apache-2.0
+    commercial: "yes"
+    min_vram_gb: 1
+    source: https://huggingface.co/usyd-community/vitpose-base-simple
+    notes: "Apache-2.0 per the model card (checked 2026-11-05); runs in transformers (VitPoseForPoseEstimation).
+      ~0.2 GB of VRAM in fp16, about a second per drawing. Finds the joints of drawn side-view characters
+      reliably when the limbs are apart (the slicing template poses); weaker with arms down over the body."
+
   - id: qwen3-vl-2b
     kind: captioning
     name: Qwen3-VL-2B-Instruct (vision-language captioner)

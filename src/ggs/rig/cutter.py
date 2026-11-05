@@ -290,13 +290,15 @@ def move_back_accessories(labels: np.ndarray, guide_labels: np.ndarray, spec: Ma
     return out, int(moved.sum())
 
 
-def cut_parts(master: np.ndarray, guide_labels: np.ndarray, spec: MasterSpec, rig: RigSpec) -> CutResult:
+def cut_parts(master: np.ndarray, guide_labels: np.ndarray, spec: MasterSpec, rig: RigSpec,
+              draw_order: list[str] | None = None) -> CutResult:
     if master.shape[:2] != guide_labels.shape:
         raise CutError("master and guide labels differ in size")
     raw = master_labels(master, guide_labels)
     labels, moved = move_back_accessories(raw, guide_labels, spec, rig)
     index = {b.name: i for i, b in enumerate(rig.bones)}
-    order = {n: k for k, n in enumerate(rig.draw_order)}
+    draw_order = list(draw_order or rig.draw_order)
+    order = {n: k for k, n in enumerate(draw_order)}
     children: dict[str, list] = {}
     for b in rig.bones:
         if b.parent:
@@ -304,6 +306,9 @@ def cut_parts(master: np.ndarray, guide_labels: np.ndarray, spec: MasterSpec, ri
     rgb = master[..., :3]
     alpha = master[..., 3]
     shape = labels.shape
+    from ggs.rig.joints import ink_mask
+
+    ink = ink_mask(rgb, alpha >= 128)
     parts: dict[str, CutPart] = {}
     for p in rig.part_sheet.parts:
         (sx, sy), (ex, ey) = spec.joints[p.bone]
@@ -313,7 +318,7 @@ def cut_parts(master: np.ndarray, guide_labels: np.ndarray, spec: MasterSpec, ri
         if own.sum() < 20:
             raise CutError(f"part {p.name!r}: almost no master pixels were labelled with it")
         fill = np.zeros(shape, bool)
-        above = np.isin(labels, [index[n] for n in rig.draw_order if order[n] > order[p.bone]])
+        above = np.isin(labels, [index[n] for n in draw_order if order[n] > order[p.bone]])
         # own pixels next to a part drawn on top carry that part's edge colour: refill them, never fill from them
         tainted = own & _grow(above, 2)
         if p.bone_far is None:  # core parts: fill what the near limbs drawn above them hide
@@ -339,7 +344,11 @@ def cut_parts(master: np.ndarray, guide_labels: np.ndarray, spec: MasterSpec, ri
         known = own & (alpha >= 128) & ~tainted
         if known.sum() < 20:  # tiny part: keep its edge pixels as they are
             known, tainted = own & (alpha >= 128), np.zeros(shape, bool)
+        inked = own & ink  # outlines: kept as drawn, never filled from
+        if (known & ~inked).sum() >= 50:
+            known, tainted = known & ~inked, tainted & ~inked
         colour = fill_from(rgb, known, fill | tainted, smooth=8)
+        colour = np.where((own & ~(fill | tainted))[..., None], rgb, colour)  # the part's own pixels stay as drawn
         out = np.zeros((*shape, 4), np.uint8)
         out[..., :3] = np.clip(np.where((own | fill)[..., None], colour, 0), 0, 255).astype(np.uint8)
         out[..., 3] = np.where(own, alpha, np.where(fill, 255, 0)).astype(np.uint8)
@@ -427,7 +436,8 @@ def normalize(cut: CutResult, spec: MasterSpec, rig: RigSpec, margin_px: int = 6
                        invented)
 
 
-def write_character(sheet: SheetResult, rig: RigSpec, out_dir: str | Path, name: str, stature: float = 1.0) -> Path:
+def write_character(sheet: SheetResult, rig: RigSpec, out_dir: str | Path, name: str, stature: float = 1.0,
+                    draw_order: list[str] | None = None) -> Path:
     import yaml
 
     from ggs.rig.character import CharacterSpec
@@ -438,7 +448,8 @@ def write_character(sheet: SheetResult, rig: RigSpec, out_dir: str | Path, name:
     if sheet.invented is not None:  # for `ggs character refine`: which pixels were filled in, not seen
         sheet.invented.save(out / "parts_filled.png")
     spec = CharacterSpec(name=name, rig=rig.id, sheet="parts.png", px_per_height=round(sheet.px_per_height, 3),
-                         bone_lengths=sheet.bone_lengths, pivots=sheet.pivots, stature=stature)
+                         bone_lengths=sheet.bone_lengths, pivots=sheet.pivots, stature=stature,
+                         draw_order=draw_order)
     path = out / "character.yaml"
     path.write_text(yaml.safe_dump(spec.model_dump(), sort_keys=False), encoding="utf-8")
     return path

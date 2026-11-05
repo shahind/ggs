@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-image = ["pillow>=10"]
+image = ["pillow>=10", "scipy>=1.10", "opencv-python-headless>=4.9"]  # opencv: warp animation
 # Desktop app (M9): PySide6 is LGPL-3.0, linked dynamically (fine for a closed-source app; ship its licence).
 ui = ["PySide6>=6.7", "pillow>=10", "pyspellchecker>=0.8"]
 # Install the CUDA build of torch first (see README); torch>=2.10 is required by the staged pipeline.

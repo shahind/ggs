@@ -100,6 +100,7 @@ class PipelinesFile(BaseModel):
     pipelines: dict[str, PipelineSpec]
     matting: dict[str, MattingSpec] = Field(default_factory=dict)
     captioning: dict[str, MattingSpec] = Field(default_factory=dict)  # same shape: registry id + paths
+    pose: dict[str, MattingSpec] = Field(default_factory=dict)  # joint detectors (same shape)
     motion: dict[str, MotionSpec] = Field(default_factory=dict)
 
 
@@ -175,6 +176,13 @@ def resolve_matting(name: str, dirs: list[Path] | None = None, spec_file: Pipeli
     if name not in spec_file.matting:
         raise ValueError(f"unknown matting model {name!r}; known: {sorted(spec_file.matting)}")
     return resolve(spec_file.matting[name].path, dirs or model_dirs(), f"matting {name}")
+
+
+def resolve_pose(name: str, dirs: list[Path] | None = None, spec_file: PipelinesFile | None = None) -> Path:
+    spec_file = spec_file or load_pipelines()
+    if name not in spec_file.pose:
+        raise ValueError(f"unknown pose model {name!r}; known: {sorted(spec_file.pose)}")
+    return resolve(spec_file.pose[name].path, dirs or model_dirs(), f"pose model {name}")
 
 
 def _motion_spec(name: str, spec_file: PipelinesFile | None) -> MotionSpec:

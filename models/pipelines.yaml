@@ -45,6 +45,13 @@ matting:
     registry: birefnet
     path: [BiRefNet]
 
+# Joint detector: finds shoulders, elbows, wrists, hips, knees and ankles in a drawn character so the skeleton
+# sits on the drawing (ggs.rig.joints; slicing and warp animation).
+pose:
+  vitpose-base-simple:
+    registry: vitpose-base-simple
+    path: [vitpose-base-simple]
+
 captioning:
   qwen3-vl-2b:
     registry: qwen3-vl-2b

@@ -69,9 +69,8 @@ def _subtree(rig: RigSpec, bone: str) -> set[str]:
     return out
 
 
-def _above(labels: np.ndarray, rig: RigSpec, bone: str, index: dict[str, int], exclude: set[str]) -> np.ndarray:
-    """Pixels of parts drawn after ``bone``, except ``exclude``."""
-    order = rig.draw_order
+def _above(labels: np.ndarray, order: list[str], bone: str, index: dict[str, int], exclude: set[str]) -> np.ndarray:
+    """Pixels of parts drawn after ``bone`` in ``order``, except ``exclude``."""
     return np.isin(labels, [index[n] for n in order[order.index(bone) + 1:] if n not in exclude])
 
 
@@ -89,6 +88,7 @@ def validate_character(character, rig: RigSpec, master: np.ndarray, spec: Master
     lengths = dict(character.spec.bone_lengths)
     size = tuple(spec.size)
     index = {b.name: i for i, b in enumerate(rig.bones)}
+    order = list(character.spec.draw_order or rig.draw_order)
     sheet_parts = rig.part_sheet.parts
 
     # 1-2. reassembly in the master pose
@@ -117,7 +117,7 @@ def validate_character(character, rig: RigSpec, master: np.ndarray, spec: Master
                             lim.min_guide_agreement, f"{p.name}: IoU {agree:.2f} with the guide (did the master "
                                                      "follow the pose?)"))
         # a wide torso crossed by the near arm shows in two pieces: count what parts drawn on top hide inside it
-        hidden = _above(cut.labels, rig, p.bone, index, {p.bone}) & m_on & convex_hull_mask(own)
+        hidden = _above(cut.labels, order, p.bone, index, {p.bone}) & m_on & convex_hull_mask(own)
         sizes = component_sizes(own | hidden, weight=own)  # pieces joined through hidden pixels, own pixels counted
         frac = sizes[0] / sum(sizes) if sizes and sum(sizes) else 0.0
         checks.append(Check(f"connected:{p.name}", frac >= lim.min_largest_piece, frac, lim.min_largest_piece,
@@ -133,9 +133,9 @@ def validate_character(character, rig: RigSpec, master: np.ndarray, spec: Master
         # a joint may be hidden under a part drawn above (in this rig the arms attach where the neck starts)
         # ... but never under the part itself or its own children: that would hide a misplaced joint
         mine = _subtree(rig, p.bone)
-        d_own = _min_dist(own | _above(cut.labels, rig, p.bone, index, mine) & m_on, start) / width
+        d_own = _min_dist(own | _above(cut.labels, order, p.bone, index, mine) & m_on, start) / width
         parent_mask = (cut.labels == index[bone.parent]) & m_on
-        d_par = _min_dist(parent_mask | _above(cut.labels, rig, bone.parent, index, mine) & m_on, start) / width
+        d_par = _min_dist(parent_mask | _above(cut.labels, order, bone.parent, index, mine) & m_on, start) / width
         ok = d_own <= lim.joint_on_part and d_par <= lim.joint_to_parent
         checks.append(Check(f"joint:{p.name}", ok, max(d_own, d_par), lim.joint_to_parent,
                             f"{p.name} start joint is {d_own:.2f} widths from its part and {d_par:.2f} from "

@@ -156,8 +156,10 @@ def test_character_workspace_tabs_open_after_accept(qapp, tmp_path, settings):
     ws.show_tab(1)
     assert len(ws.sliced.group.buttons()) >= 3 and not ws.sliced.export.isEnabled()  # nothing sliced yet
     ws.show_tab(2)
-    assert ws.animate.cutout.need.isVisibleTo(ws)  # cut-out needs the sliced version first
+    assert ws.animate.warp.need.isVisibleTo(ws)  # bending and cut-out need the sliced version first
     ws.animate.methods.button(1).click()
+    assert ws.animate.cutout.need.isVisibleTo(ws)
+    ws.animate.methods.button(2).click()
     ws.animate.drawn.list.list.setCurrentRow(1)  # first library animation: its poses are shown
     assert ws.animate.drawn.poses.pixmap() is not None
     w.close()

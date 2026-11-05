@@ -1,0 +1,132 @@
+"""Joint fitting (detections onto the guide), pixel ownership, and warp animation (CPU, no models)."""
+
+import json
+import math
+
+import numpy as np
+import pytest
+
+pytest.importorskip("PIL")
+pytest.importorskip("cv2")
+
+from ggs import items as I
+from ggs.cli import main
+from ggs.paths import rigs_dir
+from ggs.rig import load_rig_spec
+from ggs.rig.joints import bone_labels, bone_widths, cloth_share, fit_joints
+from ggs.style.package import init_project
+
+
+@pytest.fixture(scope="module")
+def rig():
+    return load_rig_spec(rigs_dir() / "humanoid_side_v1.yaml")
+
+
+@pytest.fixture(scope="module")
+def guide(rig):
+    from ggs.rig.body import PRESETS
+    from ggs.rig.make import guide_puppet
+    from ggs.rig.master import render_guide
+
+    puppet, lengths = guide_puppet(rig, PRESETS["standard"])
+    return render_guide(rig, puppet, lengths, size=512)
+
+
+def _kp(joints, moves=None, scores=None):
+    """Keypoints where the guide has its joints (r_ = near), optionally moved."""
+    where = {"sho": joints["upper_arm_near"][0], "elb": joints["forearm_near"][0], "wri": joints["hand_near"][0],
+             "hip": joints["thigh_near"][0], "knee": joints["shin_near"][0], "ank": joints["foot_near"][0]}
+    far = {"sho": joints["upper_arm_far"][0], "elb": joints["forearm_far"][0], "wri": joints["hand_far"][0],
+           "hip": joints["thigh_far"][0], "knee": joints["shin_far"][0], "ank": joints["foot_far"][0]}
+    kp = {}
+    for k, pt in where.items():
+        kp[f"r_{k}"] = (*pt, 0.9)
+        kp[f"l_{k}"] = (*far[k], 0.9)
+    for name, (dx, dy) in (moves or {}).items():
+        x, y, s = kp[name]
+        kp[name] = (x + dx, y + dy, s)
+    for name, s in (scores or {}).items():
+        kp[name] = (*kp[name][:2], s)
+    return kp
+
+
+def test_fit_moves_joints_onto_confident_close_detections(guide):
+    g, h = guide.spec.joints, guide.spec.height_px
+    # left/right swapped by the detector: matched back to near/far by position
+    kp = _kp(g, moves={"r_elb": (10, 6)})
+    kp["l_elb"], kp["r_elb"] = kp["r_elb"], kp["l_elb"]
+    joints, report = fit_joints(g, kp, h)
+    assert math.dist(joints["forearm_near"][0], (g["forearm_near"][0][0] + 10, g["forearm_near"][0][1] + 6)) < 1e-6
+    assert joints["upper_arm_near"][1] == joints["forearm_near"][0]  # the chain stays connected
+    assert report["elbow_near"] > 0
+    # far off (a mistake) or unsure: the guide's joint is kept
+    joints, report = fit_joints(g, _kp(g, moves={"r_knee": (0.4 * h, 0)}, scores={"r_wri": 0.1}), h)
+    assert report["knee_near"] == "guide" and report["wrist_near"] == "guide"
+    assert joints["shin_near"][0] == tuple(g["shin_near"][0])
+
+
+def test_labels_follow_the_skeleton(rig, guide):
+    rgba = np.asarray(guide.image)
+    widths = bone_widths(guide.labels, rig, guide.spec.joints)
+    assert widths["upper_arm_far"] == pytest.approx(widths["upper_arm_near"])  # far limbs: as wide as near ones
+    lab = bone_labels(rgba[..., 3], rig, guide.spec.joints, widths, rgb=rgba[..., :3])
+    on = rgba[..., 3] >= 128
+    assert (lab[on] >= 0).all() and (lab[~on] == -1).all()
+    agree = (lab[on] == guide.labels[on]).mean()
+    assert agree > 0.8, agree  # on the guide itself the labels mostly agree with its own parts
+    assert cloth_share(lab, rig, guide.spec.joints, widths) < 0.15  # trousers, no skirt
+
+
+def test_warp_rest_pose_reproduces_the_drawing_and_clips_play(rig, guide):
+    from ggs.rig.master import bone_angle, pose_clip
+    from ggs.rig.skin import build_skin
+
+    widths = bone_widths(guide.labels, rig, guide.spec.joints)
+    skin = build_skin(rig, guide.image, guide.spec.joints, widths, guide.spec.height_px)
+    assert not skin.skirt and {L.name for L in skin.layers} >= {"body", "upper_arm_near", "thigh_far"}
+    angles = {b: bone_angle(*guide.spec.joints[b]) for b in guide.spec.joints}
+    frames, _ = skin.render_clip(pose_clip(rig, angles, skin.lengths()), round(guide.spec.height_px))
+    got = np.asarray(frames[0])[..., 3] >= 128
+    want = np.asarray(guide.image)[..., 3] >= 128
+    ys, xs = np.nonzero(want)
+    want = want[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    ys, xs = np.nonzero(got)
+    got = got[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    h, w = min(got.shape[0], want.shape[0]), min(got.shape[1], want.shape[1])
+    iou = (got[:h, :w] & want[:h, :w]).sum() / (got[:h, :w] | want[:h, :w]).sum()
+    assert iou > 0.95, iou
+    bent = {**angles, "forearm_near": angles["forearm_near"] + 70, "shin_far": angles["shin_far"] - 50}
+    frames, _anchor = skin.render_clip(pose_clip(rig, bent, skin.lengths()), 128)
+    assert frames[0].getchannel("A").getbbox() is not None and frames[0].height <= 140
+
+
+def test_legs_go_behind_a_skirt(rig):
+    from ggs.rig.skin import legs_behind
+
+    order = legs_behind(rig.draw_order)
+    assert sorted(order) == sorted(rig.draw_order)
+    assert max(order.index(b) for b in order if b.startswith(("thigh", "shin", "foot"))) < order.index("pelvis")
+
+
+def test_slicing_makes_a_warp_rig_that_exports(tmp_path):
+    from ggs.rig.library import library_clip
+    from ggs.rig.slices import make_slices, warp_skin
+
+    p = tmp_path / "g"
+    init_project(p, "G")
+    I.create(p, "character", "Hero", "a hero", I.ItemSettings(character=I.CharacterSettings(view="side", pose="idle")))
+    I.generate(p, "Hero", action="new", model="stub", enforce_vram=False)
+    I.accept(p, "Hero")
+    make_slices(p, "Hero", "side_simple", enforce_vram=False)
+    d = p / "items" / "character" / "hero"
+    skin = warp_skin(d)
+    assert skin is not None and json.loads(skin.read_text(encoding="utf-8"))["format"] == "ggs.skin"
+    walk = library_clip("walk")
+    if not walk.exists():
+        pytest.skip("motion library not built (tools/make_motion_library.py)")
+    out = tmp_path / "walk.png"
+    assert main(["export", str(walk), "--character", str(skin), "--format", "sheet", "--height", "96",
+                 "--out", str(out)]) == 0
+    assert out.exists() and out.with_suffix(".json").exists()
+    assert main(["export", str(walk), "--character", str(skin), "--format", "godot", "--out",
+                 str(tmp_path / "g2")]) == 1  # warp animations are pictures

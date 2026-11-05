@@ -22,15 +22,18 @@ packs:
         dir: FLUX.2-klein-4B-GGUF
         include: [flux-2-klein-4b-Q4_K_M.gguf]
   cutout:
-    label: Cut-out model (BiRefNet)
-    why: Gives every asset a clean transparent background.
+    label: Cut-out model (BiRefNet) and joint finder (ViTPose)
+    why: Gives every asset a clean transparent background, and finds a character's joints for animation.
     required: true
-    size_gb: 0.41
-    ready_when: {matting: [birefnet]}
+    size_gb: 0.74
+    ready_when: {matting: [birefnet], pose: [vitpose-base-simple]}
     parts:
       - repo: ZhengPeng7/BiRefNet
         dir: BiRefNet
         include: ["*"]
+      - repo: usyd-community/vitpose-base-simple
+        dir: vitpose-base-simple
+        include: ["*.json", "*.safetensors"]
   sdxl:
     label: SDXL (optional second drawing model)
     why: Faster style training; a different look. (Its 8-step Lightning LoRA comes with the installer.)

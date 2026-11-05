@@ -201,7 +201,8 @@ def cut_master(master_json: str | Path, rig: RigSpec, out_dir: str | Path, name:
         raise ValueError(f"{master_json} was made for rig {spec.rig!r}, not {rig.id!r}")
     out = Path(out_dir)
     try:
-        cut = cut_parts(master, labels, spec, rig)
+        order = spec.fit.get("draw_order") or None  # a skirt: the legs go behind the body
+        cut = cut_parts(master, labels, spec, rig, order)
         sheet = normalize(cut, spec, rig)
     except CutError as exc:  # the master is too far off to cut at all: a rejection, not a crash
         from ggs.rig.validate import Check, Report
@@ -211,7 +212,7 @@ def cut_master(master_json: str | Path, rig: RigSpec, out_dir: str | Path, name:
         (out / "validation.json").write_text(json.dumps({**report.to_dict(), "master": str(Path(master_json)
                                                          .resolve())}, indent=1), encoding="utf-8")
         return CutOutcome(None, report, 0.0, 0.0)
-    path = write_character(sheet, rig, out_dir, name, stature=stature)
+    path = write_character(sheet, rig, out_dir, name, stature=stature, draw_order=order)
     report = validate_character(load_character(path), rig, master, spec, cut, labels)
     info = {**report.to_dict(), "master": str(Path(master_json).resolve()), "scale": round(sheet.scale, 4),
             "px_per_height": round(sheet.px_per_height, 2), "parts": sheet.placements}

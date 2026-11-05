@@ -90,6 +90,7 @@ class MasterSpec(BaseModel):
     seed: int | None = None
     model: str = ""
     body: dict = Field(default_factory=dict)  # the guide's body shape (ggs.rig.body.BodyShape fields)
+    fit: dict = Field(default_factory=dict)  # joints moved onto the drawing (ggs.rig.joints.fit_master)
 
 
 @dataclass

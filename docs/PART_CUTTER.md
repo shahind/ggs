@@ -20,6 +20,12 @@ The roadmap planned SAM for step 2. With a known pose the guide masks already gi
 segmentation model is needed (deterministic, nothing to download). SAM stays an option for masters that come from
 elsewhere (a user's own drawing), which also needs joint picking in the UI (M9).
 
+## Fitting the joints (M12)
+Before cutting, `ggs.rig.joints` moves the guide's skeleton onto the joints ViTPose finds in the drawing and
+labels the pixels from that skeleton (widths, outlined regions, cloth on the waist); see docs/ANIMATION_V3.md. The
+guide's own labels are kept in `guide_labels_guide.png`. Without the joint finder (or with the stub model) the cut
+follows the guide as below.
+
 ## Cutting
 - **Labels:** every opaque master pixel gets the part of the nearest guide pixel (the top-most part where parts
   overlap). Hair, capes and wide sleeves therefore join the nearest part.

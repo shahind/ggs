@@ -1154,6 +1154,8 @@ def cmd_export(args: argparse.Namespace) -> int:
 
     engine = args.format in ("rig", "godot", "unity", "defold")
     lines = []
+    if Path(args.character).name == "skin.json":
+        return _export_warp(args)
     try:
         character = load_character(args.character)
         spec = load_rig_spec(args.rig or rigs_dir() / f"{character.spec.rig}.yaml")
@@ -1230,6 +1232,53 @@ def cmd_export(args: argparse.Namespace) -> int:
     for ln in lines:
         print(ln)
     dest = Path(args.out) / "CREDITS.txt" if len(clips) > 1 else Path(args.out).with_name(
+        Path(args.out).stem + "_CREDITS.txt")
+    _export_credits(args.clip, dest)
+    return 0
+
+
+def _export_warp(args: argparse.Namespace) -> int:
+    """Clips played by a warp rig (skin.json): the drawing bent by its skeleton, rendered to pictures."""
+    from ggs.export.animated import ExportError, parse_color, save_apng, save_gif, save_webp
+    from ggs.export.sheet import save_sprite_sheet
+    from ggs.rig.clip import load_clip
+    from ggs.rig.skin import SkinError, load_skin
+
+    try:
+        if args.format not in ("apng", "webp", "gif", "sheet"):
+            raise ExportError("a warp animation is exported as pictures: --format apng, webp, gif or sheet (a sprite "
+                              "sheet + JSON atlas works in Godot, Unity and Defold)")
+        if not args.clip:
+            raise ExportError("give at least one animation")
+        if args.format == "gif" and not args.matte:
+            raise ExportError("GIF has 1-bit alpha; pass --matte #RRGGBB (your game's background colour)")
+        skin = load_skin(args.character)
+        ext = {"apng": ".png", "webp": ".webp", "gif": ".gif", "sheet": ".png"}[args.format]
+        many = len(args.clip) > 1
+        for path in args.clip:
+            clip = load_clip(path)
+            if clip.rig != skin.rig.id:
+                raise ValueError(f"{Path(path).name} is for rig {clip.rig!r}; this character uses {skin.rig.id!r}")
+            name = args.name if (args.name and not many) else Path(path).stem
+            target = Path(args.out) / f"{name}{ext}" if many else Path(args.out)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            frames, anchor = skin.render_clip(clip, args.height, padding=args.padding)
+            if args.format == "apng":
+                out = save_apng(frames, target, clip.fps, clip.loop)
+            elif args.format == "webp":
+                out = save_webp(frames, target, clip.fps, clip.loop)
+            elif args.format == "gif":
+                out = save_gif(frames, target, clip.fps, parse_color(args.matte), clip.loop)
+            else:
+                out, atlas = save_sprite_sheet(frames, anchor, target, name, clip.fps, clip.loop,
+                                               padding=args.padding)
+                print(f"wrote {atlas}")
+            w, h = frames[0].size
+            print(f"wrote {out}: {clip.frame_count} frames of {w}x{h} px, pivot {anchor}")
+    except (ExportError, SkinError, ValueError, OSError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    dest = Path(args.out) / "CREDITS.txt" if len(args.clip) > 1 else Path(args.out).with_name(
         Path(args.out).stem + "_CREDITS.txt")
     _export_credits(args.clip, dest)
     return 0

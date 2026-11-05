@@ -118,7 +118,7 @@ def write_rig_package(rig: RigSpec, character: Character, clips: dict[str, Clip]
         "parts": parts_json,
         "head_variants": variants_json,
         "items": items_json,
-        "draw_order": list(rig.draw_order),
+        "draw_order": list(character.spec.draw_order or rig.draw_order),
         "limb_groups": [{"name": g.name, "near": list(g.near), "far": list(g.far)}
                         for g in limb_groups(rig)],
         "sockets": [s.model_dump() for s in rig.sockets],

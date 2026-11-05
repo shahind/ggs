@@ -38,6 +38,7 @@ class CharacterSpec(BaseModel):
     bone_lengths: dict[str, float]
     pivots: dict[str, tuple[float, float]] = Field(default_factory=dict)  # part name -> cell fraction
     stature: float = Field(1.0, gt=0, le=10)  # in-game height relative to other characters (export height x this)
+    draw_order: list[str] | None = None  # back to front; None = the rig's (a skirt puts the legs behind the body)
 
 
 class Character:
@@ -88,7 +89,7 @@ class Character:
                 parts[p.bone_far] = PartImage(img, pivot, p.art_angle, length, p.far_tint)
         from ggs.rig.equipment import attachment_for
 
-        return Puppet(bone_defs(rig), dict(self.spec.bone_lengths), list(rig.draw_order),
+        return Puppet(bone_defs(rig), dict(self.spec.bone_lengths), list(self.spec.draw_order or rig.draw_order),
                       limb_groups(rig), parts, [attachment_for(i, rig) for i in items or []])
 
 
