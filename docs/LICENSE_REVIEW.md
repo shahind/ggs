@@ -38,8 +38,8 @@ Core/Gui/Widgets/Svg/Network/OpenGL (LGPL-3.0: the DLLs stay separate files the 
 the LGPL needs; add the LGPL text and a Qt source offer to `licenses/` before release), numpy, pillow, pydantic,
 pyyaml, requests, huggingface_hub, diffusers, transformers, accelerate, peft, safetensors, gguf, timm, kornia,
 einops and their dependencies (permissive licences; collect each package's licence file into `licenses/` before
-release). **No model weights or LoRAs are bundled**: the app downloads them on first run from the repos in
-`models/downloads.yaml` (the same rows as the table above). The SDXL-Lightning LoRA (394 MB) is in the optional
-SDXL download, not in the installer, until the owner decides otherwise.
+release). **No main model weights are bundled**: the app downloads them on first run from the repos in
+`models/downloads.yaml` (the same rows as the table above). **LoRAs are bundled** (owner, 2026-11-04): the
+SDXL-Lightning 8-step LoRA (394 MB, openrail++: ship the licence and its use restrictions in `licenses/`).
 
 When a new model is used, add a row here in the same commit.

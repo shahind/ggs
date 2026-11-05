@@ -1,6 +1,12 @@
 # Model packs the app can download on first run (into ~/.ggs/models). Nothing here is bundled in the installer.
 # A pack is ready when every pipeline / matting / captioning entry it names resolves (`ggs models status`).
 # Sizes are from the Hugging Face hub (2026-11-04). Licences: docs/LICENSE_REVIEW.md.
+
+# Small model files the installer DOES include (owner, 2026-11-04: bundle the LoRAs). tools/build_app.py copies
+# each from the first model folder that has it into <app>/models/, which is searched last.
+bundled:
+  - SDXL-Lightning/sdxl_lightning_8step_lora.safetensors   # 394 MB, openrail++
+
 packs:
   drawing:
     label: Drawing model (FLUX.2 klein 4B)
@@ -27,9 +33,9 @@ packs:
         include: ["*"]
   sdxl:
     label: SDXL (optional second drawing model)
-    why: Faster style training; a different look. Includes the 8-step Lightning LoRA (394 MB).
+    why: Faster style training; a different look. (Its 8-step Lightning LoRA comes with the installer.)
     required: false
-    size_gb: 7.1
+    size_gb: 6.7
     ready_when: {pipelines: [sdxl]}
     parts:
       - repo: stabilityai/stable-diffusion-xl-base-1.0
@@ -41,9 +47,6 @@ packs:
       - repo: madebyollin/sdxl-vae-fp16-fix
         dir: sdxl-vae-fp16-fix
         include: [config.json, diffusion_pytorch_model.safetensors]
-      - repo: ByteDance/SDXL-Lightning
-        dir: SDXL-Lightning
-        include: [sdxl_lightning_8step_lora.safetensors]
   captioner:
     label: Image describer (Qwen3-VL 2B)
     why: Only needed to train your own styles.

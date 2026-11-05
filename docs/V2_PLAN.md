@@ -52,8 +52,9 @@ brightness-as-alpha transparency (owner: fine).
   the venv's site-packages (CUDA torch, Qt trimmed by ~580 MB) + ggs + data, 4.35 GB; no PyInstaller, because
   torch/diffusers lazy imports and BiRefNet's remote code want a real Python. `tools/installer.iss` packs it
   into a per-user Inno Setup installer (Start menu / desktop shortcuts to `pythonw -m ggs.ui.app`, optional
-  `ggs` on PATH). Models: `models/downloads.yaml` packs (drawing 10.1 GB + cut-out 0.4 GB required; SDXL 7.1 GB
-  and the captioner 4 GB optional), downloaded by `ggs models fetch` (HTTP range resume) from the app's
+  `ggs` on PATH). LoRAs are bundled (`bundled:` in `models/downloads.yaml`, now the 394 MB SDXL-Lightning LoRA,
+  copied to `<app>/models/`, searched after ~/.ggs/models). Models: `models/downloads.yaml` packs (drawing
+  10.1 GB + cut-out 0.4 GB required; SDXL 6.7 GB and the captioner 4 GB optional), downloaded by `ggs models fetch` (HTTP range resume) from the app's
   first-run "Set up the AI models" screen, which can also point at an existing ComfyUI models folder.
 
 ## Order

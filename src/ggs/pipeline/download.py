@@ -36,13 +36,29 @@ class Pack(BaseModel):
     parts: list[Part]
 
 
-def load_packs(path: Path | None = None) -> dict[str, Pack]:
+def _manifest(path: Path | None = None) -> tuple[Path, dict]:
     path = path or repo_root() / "models" / "downloads.yaml"
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        return path, yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        raise ValueError(f"{path}: {exc}") from exc
+
+
+def load_packs(path: Path | None = None) -> dict[str, Pack]:
+    path, data = _manifest(path)
+    try:
         return {k: Pack.model_validate(v) for k, v in data.get("packs", {}).items()}
     except Exception as exc:
         raise ValueError(f"{path}: {exc}") from exc
+
+
+def bundled_files(path: Path | None = None) -> list[str]:
+    """Model files (relative to a models folder) that the installer ships."""
+    path, data = _manifest(path)
+    files = data.get("bundled") or []
+    if not all(isinstance(f, str) for f in files):
+        raise ValueError(f"{path}: bundled must be a list of relative file paths")
+    return files
 
 
 def pack_ready(pack: Pack) -> bool:

@@ -39,7 +39,8 @@ def save_user_config(cfg: UserConfig, path: Path | None = None) -> Path:
 
 def model_dirs(cfg: UserConfig | None = None) -> list[Path]:
     cfg = cfg or load_user_config()
-    dirs = [shared_dir() / "models", *(Path(d).expanduser() for d in cfg.model_dirs)]
+    # last: the app's own models folder, where the installer puts the bundled LoRAs (downloads.yaml `bundled`)
+    dirs = [shared_dir() / "models", *(Path(d).expanduser() for d in cfg.model_dirs), repo_root() / "models"]
     seen, out = set(), []
     for d in dirs:
         key = str(d.resolve()).lower()

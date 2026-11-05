@@ -4,17 +4,19 @@ Run with the project's venv python (the one that has the CUDA torch and the ``gp
 
     .venv\\Scripts\\python tools\\build_app.py
 
-Layout (no AI model weights; the app downloads them on first run, see models/downloads.yaml):
+Layout (no main AI models; the app downloads them on first run, see models/downloads.yaml):
 
     dist/GGS/
       python/            a private copy of the base Python + the venv's site-packages + the ggs package
       recipes/ rigs/ clips/ models/*.yaml   data (ggs.paths.repo_root() finds them next to python/)
+      models/<dir>/...   the bundled LoRAs (downloads.yaml `bundled`), searched after ~/.ggs/models
       ggs.cmd            command line:  ggs.cmd generate --class sprite ...
-      Start GGS.cmd      the desktop app (the installer makes shortcuts to python\pythonw.exe -m ggs.ui.app)
+      Start GGS.cmd      the desktop app (the installer makes shortcuts to python/pythonw.exe -m ggs.ui.app)
       GGS.ico, licenses/
 
 Why not PyInstaller: torch, diffusers/transformers lazy imports and BiRefNet's remote code (loaded from the
 Hugging Face module cache at run time) all want a real Python on disk; a portable Python avoids freezing bugs.
+Small model files listed under ``bundled`` in models/downloads.yaml (the LoRAs) go into ``models/``.
 A ``python313._pth`` file isolates the bundled Python from any Python, PYTHONPATH or user site on the machine.
 """
 
@@ -99,6 +101,23 @@ def trim_qt(qt: Path) -> int:
     return removed
 
 
+def bundle_models(dest: Path) -> None:
+    """Copy the small model files listed under ``bundled`` in models/downloads.yaml (LoRAs) into the app."""
+    from ggs.pipeline.download import bundled_files
+    from ggs.pipeline.models import model_dirs
+
+    dirs = [d for d in model_dirs() if d.resolve() != (ROOT / "models").resolve()]
+    for rel in bundled_files(ROOT / "models" / "downloads.yaml"):
+        src = next((d / rel for d in dirs if (d / rel).is_file()), None)
+        if src is None:
+            raise SystemExit(f"bundled model file {rel} not found in {[str(d) for d in dirs]}")
+        out = dest / rel
+        if not out.exists() or out.stat().st_size != src.stat().st_size:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, out)
+        print(f"bundled {rel} ({src.stat().st_size / 2**20:.0f} MB)")
+
+
 def make_icon(out: Path) -> None:
     from PIL import Image
 
@@ -140,6 +159,7 @@ def build(dist: Path, skip_site: bool = False) -> Path:
     (app / "models").mkdir(exist_ok=True)
     for f in MODEL_YAML:
         shutil.copy2(ROOT / "models" / f, app / "models" / f)
+    bundle_models(app / "models")
     lic = app / "licenses"
     lic.mkdir(exist_ok=True)
     shutil.copy2(ROOT / "docs" / "LICENSE_REVIEW.md", lic / "LICENSE_REVIEW.md")

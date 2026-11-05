@@ -9,7 +9,7 @@ import pytest
 
 requests = pytest.importorskip("requests")
 
-from ggs.pipeline import download as D  # noqa: E402
+from ggs.pipeline import download as D
 
 
 def test_manifest_loads_and_required_packs_cover_drawing_and_cutout():
@@ -101,3 +101,19 @@ def test_jobs_use_console_python_next_to_pythonw(monkeypatch, tmp_path):
     assert C._python() == str(tmp_path / "python.exe")
     monkeypatch.setattr(sys, "executable", str(tmp_path / "python.exe"))
     assert C._python() == str(tmp_path / "python.exe")
+
+
+def test_bundled_loras_are_found_in_the_app_models_folder(monkeypatch, tmp_path):
+    from ggs.pipeline.models import load_pipelines, model_dirs, resolve
+
+    files = D.bundled_files()
+    assert "SDXL-Lightning/sdxl_lightning_8step_lora.safetensors" in files
+    assert not any(p.repo == "ByteDance/SDXL-Lightning" for pk in D.load_packs().values() for p in pk.parts)
+    monkeypatch.setenv("GGS_ROOT", str(tmp_path))
+    assert model_dirs()[-1] == tmp_path / "models"
+    lora = tmp_path / "models" / files[0]
+    lora.parent.mkdir(parents=True)
+    lora.write_bytes(b"x")
+    candidates = load_pipelines(Path(__file__).resolve().parents[1] / "models" / "pipelines.yaml"
+                                ).pipelines["sdxl"].extras["speed_lora"]
+    assert resolve(candidates, [tmp_path / "models"], "speed lora") == lora
