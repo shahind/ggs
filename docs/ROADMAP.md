@@ -133,7 +133,8 @@ Each milestone is done only when its acceptance check passes. Update this file a
 - The app writes into the project folder: `assets/<class>/`, `characters/<name>_<time>/seed_NNN/`, `clips/`
   (BVH imports, looped), `items/`, `exports/<character>/`, `style_data/` (datasets and .ggsstyle files).
 - PySide6 is LGPL-3.0 (dynamic linking is fine for a closed app; ship its licence) - logged in LICENSE_REVIEW.
-- Not in v1: collections (labels bound to recipes), an installer (PyInstaller/Briefcase), drag-and-drop,
+- Installer: done in v2 (portable Python + Inno Setup, first-run model downloads; see V2_PLAN section 4).
+- Not in v1: collections (labels bound to recipes), drag-and-drop,
   per-asset re-run/upscale, thumbnails of animations in the grid, cancel that also cleans partial outputs.
 
 ## Open decisions for the owner

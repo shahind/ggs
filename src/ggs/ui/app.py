@@ -36,6 +36,13 @@ class MainWindow(QMainWindow):
         if project and (Path(project) / ".ggs" / "project.yaml").exists():
             self.open_project(Path(project))
 
+    def check_models(self) -> None:
+        """First run: offer to download the AI models when a required one is missing."""
+        from ggs.ui.setup import ModelSetupDialog, missing_required
+
+        if missing_required():
+            ModelSetupDialog(self.queue, self).exec()
+
     def open_project(self, project: Path) -> None:
         from ggs.ui.project_view import ProjectView
 
@@ -91,6 +98,10 @@ def main(argv: list[str] | None = None) -> int:
     app.setStyleSheet(QSS)
     win = MainWindow(project)
     win.show()
+    if "--no-setup" not in argv:
+        from PySide6.QtCore import QTimer
+
+        QTimer.singleShot(300, win.check_models)
     return app.exec()
 
 

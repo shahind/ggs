@@ -110,6 +110,9 @@ python -m ggs clip keys clips/swing_one_hand.yaml --out swing.json; python -m gg
 python -m ggs export walk_swing.json --character chars/knight/character.yaml --item items/sword --format godot --out build/knight
 python -m ggs generate --class tile --prompt "grey cobblestone" --out tiles/cobble.png   # also background, background_wrap, ui_panel, ui_icon, vfx
 python -m ggs ui            # desktop app (pip install -e ".[ui]"); same commands underneath
+python -m ggs models status; python -m ggs models fetch required   # first-run model packs (models/downloads.yaml)
+.venv\Scripts\python tools\build_app.py   # standalone app folder dist/GGS (portable Python + CUDA torch, no models)
+ISCC tools\installer.iss                   # -> dist/GGS-Setup-<ver>.exe (+ .bin slices), per-user install
 python -m ggs export cycle.json --character chars/pa/character.yaml --format apng --out walk.png  # or webp|gif|sheet|rig
 python -m ggs export cycle.json --character chars/pa/character.yaml --format godot --out build/hero  # or unity|defold
 ```

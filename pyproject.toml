@@ -4,13 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ggs"
-version = "0.0.1"
+version = "0.1.0"
 description = "Game Graphic Studio: local AI generation of game-ready 2D assets"
 requires-python = ">=3.10"
 dependencies = [
   "numpy>=1.26",
   "pydantic>=2.5",
   "pyyaml>=6",
+  "requests>=2.28",  # model downloads
 ]
 
 [project.optional-dependencies]

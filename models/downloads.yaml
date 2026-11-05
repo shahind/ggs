@@ -1,0 +1,56 @@
+# Model packs the app can download on first run (into ~/.ggs/models). Nothing here is bundled in the installer.
+# A pack is ready when every pipeline / matting / captioning entry it names resolves (`ggs models status`).
+# Sizes are from the Hugging Face hub (2026-11-04). Licences: docs/LICENSE_REVIEW.md.
+packs:
+  drawing:
+    label: Drawing model (FLUX.2 klein 4B)
+    why: Draws every asset and character.
+    required: true
+    size_gb: 10.1
+    ready_when: {pipelines: [flux2-klein-4b]}
+    parts:
+      - repo: black-forest-labs/FLUX.2-klein-4B
+        dir: FLUX.2-klein-4B
+        include: [model_index.json, "scheduler/*", "tokenizer/*", "text_encoder/*", transformer/config.json, "vae/*"]
+      - repo: unsloth/FLUX.2-klein-4B-GGUF
+        dir: FLUX.2-klein-4B-GGUF
+        include: [flux-2-klein-4b-Q4_K_M.gguf]
+  cutout:
+    label: Cut-out model (BiRefNet)
+    why: Gives every asset a clean transparent background.
+    required: true
+    size_gb: 0.41
+    ready_when: {matting: [birefnet]}
+    parts:
+      - repo: ZhengPeng7/BiRefNet
+        dir: BiRefNet
+        include: ["*"]
+  sdxl:
+    label: SDXL (optional second drawing model)
+    why: Faster style training; a different look. Includes the 8-step Lightning LoRA (394 MB).
+    required: false
+    size_gb: 7.1
+    ready_when: {pipelines: [sdxl]}
+    parts:
+      - repo: stabilityai/stable-diffusion-xl-base-1.0
+        dir: stable-diffusion-xl-base-1.0
+        include: [model_index.json, "scheduler/*", "tokenizer/*", "tokenizer_2/*", text_encoder/config.json,
+                  text_encoder/model.fp16.safetensors, text_encoder_2/config.json,
+                  text_encoder_2/model.fp16.safetensors, unet/config.json,
+                  unet/diffusion_pytorch_model.fp16.safetensors, vae/config.json]
+      - repo: madebyollin/sdxl-vae-fp16-fix
+        dir: sdxl-vae-fp16-fix
+        include: [config.json, diffusion_pytorch_model.safetensors]
+      - repo: ByteDance/SDXL-Lightning
+        dir: SDXL-Lightning
+        include: [sdxl_lightning_8step_lora.safetensors]
+  captioner:
+    label: Image describer (Qwen3-VL 2B)
+    why: Only needed to train your own styles.
+    required: false
+    size_gb: 4.0
+    ready_when: {captioning: [qwen3-vl-2b]}
+    parts:
+      - repo: Qwen/Qwen3-VL-2B-Instruct
+        dir: Qwen3-VL-2B-Instruct
+        include: ["*.json", "*.safetensors", "*.txt", "*.jinja"]

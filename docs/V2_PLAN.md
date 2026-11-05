@@ -47,8 +47,14 @@ brightness-as-alpha transparency (owner: fine).
 
 ## 4. Delivery
 - Own git repository for GGS, commits per step.
-- Installable standalone app: PyInstaller build + Inno Setup installer. The AI runtime (torch CUDA) and model
-  weights are large: decide between bundling them (multi-GB installer) and a first-run setup that downloads them.
+- Installable standalone app (owner, 2026-11-04: bundle everything except the main AI models; LoRAs only if ~50 MB).
+  Done: `tools/build_app.py` makes `dist/GGS` = a private copy of Python 3.13 (isolated by `python313._pth`) +
+  the venv's site-packages (CUDA torch, Qt trimmed by ~580 MB) + ggs + data, 4.35 GB; no PyInstaller, because
+  torch/diffusers lazy imports and BiRefNet's remote code want a real Python. `tools/installer.iss` packs it
+  into a per-user Inno Setup installer (Start menu / desktop shortcuts to `pythonw -m ggs.ui.app`, optional
+  `ggs` on PATH). Models: `models/downloads.yaml` packs (drawing 10.1 GB + cut-out 0.4 GB required; SDXL 7.1 GB
+  and the captioner 4 GB optional), downloaded by `ggs models fetch` (HTTP range resume) from the app's
+  first-run "Set up the AI models" screen, which can also point at an existing ComfyUI models folder.
 
 ## Order
 1 git -> 2 item model + app shell -> 3 wizard, chat actions, progress, errors -> 4 body/pose editor + single

@@ -12,7 +12,7 @@ BAD = "#e0646a"
 
 QSS = f"""
 * {{ font-family: "Segoe UI", "Inter", sans-serif; font-size: 10pt; color: {TEXT}; }}
-QMainWindow, QWidget#root, QStackedWidget, QScrollArea#root {{ background: {BG}; }}
+QMainWindow, QDialog, QWidget#root, QStackedWidget, QScrollArea#root {{ background: {BG}; }}
 QWidget#panel, QFrame#panel {{ background: {PANEL}; border-radius: 10px; }}
 QFrame#card {{ background: {CARD}; border: 1px solid {LINE}; border-radius: 12px; }}
 QFrame#card:hover {{ border-color: {ACCENT}; }}

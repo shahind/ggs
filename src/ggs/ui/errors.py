@@ -12,6 +12,10 @@ STAGES = {  # @stage <name> markers (GGS_PROGRESS=1) -> what the user sees
     "latents": "Preparing your images...",
     "train": "Training the style (this takes a while)...",
     "caption": "Describing your images...",
+    "download_drawing": "Downloading the drawing model...",
+    "download_cutout": "Downloading the cut-out model...",
+    "download_sdxl": "Downloading SDXL...",
+    "download_captioner": "Downloading the image describer...",
 }
 
 RULES = [

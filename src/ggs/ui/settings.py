@@ -45,9 +45,14 @@ class SettingsDialog(QDialog):
         t2 = QLabel("This computer")
         t2.setObjectName("h2")
         lay.addWidget(t2)
+        row2 = QHBoxLayout()
         check = QPushButton("Check my computer and models")
         check.clicked.connect(self._check)
-        lay.addWidget(check)
+        models = QPushButton("Download models...")
+        models.clicked.connect(self._models)
+        row2.addWidget(check)
+        row2.addWidget(models)
+        lay.addLayout(row2)
         self.report = QPlainTextEdit()
         self.report.setReadOnly(True)
         lay.addWidget(self.report, 1)
@@ -67,6 +72,12 @@ class SettingsDialog(QDialog):
         p = self.pick.path()
         if p:
             self.queue.submit(Job("add models folder", [C.models_add_dir(p)], done=lambda ok: self._load_dirs()))
+
+    def _models(self) -> None:
+        from ggs.ui.setup import ModelSetupDialog
+
+        ModelSetupDialog(self.queue, self).exec()
+        self._load_dirs()
 
     def _check(self) -> None:
         self.report.setPlainText("Checking...")

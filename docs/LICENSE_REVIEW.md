@@ -31,4 +31,15 @@ Not usable, even in the final product, without a separate license: RMBG-2.0 (CC 
 Software dependencies to ship with their licences: PySide6 / Qt (LGPL-3.0, desktop app), diffusers,
 transformers, peft, torch (Apache-2.0 / BSD-style).
 
+**The installer (tools/build_app.py, 2026-11-04) bundles**, besides GGS itself: CPython 3.13 (PSF licence, copied
+to `licenses/`), torch 2.11 + the NVIDIA CUDA 12.8 / cuDNN 9 runtime DLLs it ships with (redistributable under
+NVIDIA's CUDA EULA / cuDNN SLA "distributable" terms: **verify** before release), PySide6 / Qt trimmed to
+Core/Gui/Widgets/Svg/Network/OpenGL (LGPL-3.0: the DLLs stay separate files the user can replace, which is what
+the LGPL needs; add the LGPL text and a Qt source offer to `licenses/` before release), numpy, pillow, pydantic,
+pyyaml, requests, huggingface_hub, diffusers, transformers, accelerate, peft, safetensors, gguf, timm, kornia,
+einops and their dependencies (permissive licences; collect each package's licence file into `licenses/` before
+release). **No model weights or LoRAs are bundled**: the app downloads them on first run from the repos in
+`models/downloads.yaml` (the same rows as the table above). The SDXL-Lightning LoRA (394 MB) is in the optional
+SDXL download, not in the installer, until the owner decides otherwise.
+
 When a new model is used, add a row here in the same commit.

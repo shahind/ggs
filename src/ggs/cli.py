@@ -854,6 +854,37 @@ def cmd_asset_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_models_status(args: argparse.Namespace) -> int:
+    from ggs.pipeline.download import load_packs, pack_ready
+
+    missing_required = False
+    for name, pack in load_packs().items():
+        ok = pack_ready(pack)
+        missing_required |= pack.required and not ok
+        need = "required" if pack.required else "optional"
+        print(f"{name:10} {'ready  ' if ok else 'missing'} {pack.size_gb:5.1f} GB  {need:8}  {pack.label}")
+    return 1 if missing_required else 0
+
+
+def cmd_models_fetch(args: argparse.Namespace) -> int:
+    from ggs.pipeline.download import fetch_pack, load_packs, pack_ready
+
+    packs = load_packs()
+    names = [n for n, p in packs.items() if p.required] if args.pack == "required" else [args.pack]
+    for n in names:
+        if n not in packs:
+            print(f"ERROR: unknown model pack {n!r}; known: {sorted(packs)}", file=sys.stderr)
+            return 1
+        print(f"@stage download_{n}", flush=True)
+        try:
+            fetch_pack(n, packs[n], progress=lambda m: print(m, flush=True))
+        except OSError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+        print(f"{n}: {'ready' if pack_ready(packs[n]) else 'downloaded, but still not complete'}")
+    return 0
+
+
 def cmd_clip_loop(args: argparse.Namespace) -> int:
     from ggs.rig.clip import load_clip
     from ggs.rig.cliptools import ClipError, cut_loop, find_loop
@@ -961,6 +992,11 @@ def build_parser() -> argparse.ArgumentParser:
     ad = models.add_parser("add-dir", help="also search this folder for model files (e.g. ComfyUI models)")
     ad.add_argument("path")
     ad.set_defaults(func=cmd_models_add_dir)
+    mst = models.add_parser("status", help="which model packs are ready (exit 1 if a required one is missing)")
+    mst.set_defaults(func=cmd_models_status)
+    mf = models.add_parser("fetch", help="download a model pack into ~/.ggs/models (resumable)")
+    mf.add_argument("pack", help="pack name from models/downloads.yaml, or 'required'")
+    mf.set_defaults(func=cmd_models_fetch)
     ck = models.add_parser("check", help="show which files each pipeline would load")
     ck.add_argument("--profile", choices=["standard", "lite"], default=None)
     ck.set_defaults(func=cmd_models_check)

@@ -14,7 +14,17 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-GGS = [sys.executable, "-m", "ggs"]
+
+def _python() -> str:
+    """The console python next to the running one: the app runs under pythonw.exe (no console), but its jobs
+    need a python whose output can be read (Qt starts them without a console window)."""
+    exe = Path(sys.executable)
+    if exe.stem.lower() == "pythonw" and (exe.parent / "python.exe").exists():
+        return str(exe.parent / "python.exe")
+    return str(exe)
+
+
+GGS = [_python(), "-m", "ggs"]
 
 
 def slug(text: str, limit: int = 40) -> str:
@@ -182,6 +192,10 @@ def models_check() -> list[str]:
 
 def models_add_dir(path: Path) -> list[str]:
     return [*GGS, "models", "add-dir", str(path)]
+
+
+def models_fetch(pack: str) -> list[str]:
+    return [*GGS, "models", "fetch", pack]
 
 
 # ---------------------------------------------------------------- reading results back

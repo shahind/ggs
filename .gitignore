@@ -19,3 +19,7 @@ outputs/
 cache/
 
 .env
+
+# app build output
+dist/
+build/
