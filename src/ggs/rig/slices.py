@@ -122,12 +122,6 @@ def sliced_info(item_dir: Path) -> dict:
         return {}
 
 
-def warp_skin(item_dir: Path) -> Path | None:
-    """The item's warp rig (sliced/warp/skin.json), made with the sliced version."""
-    p = sliced_dir(item_dir) / "warp" / "skin.json"
-    return p if p.exists() else None
-
-
 def fit_masters(masters: list[Path], rig, model: str, stages) -> bool:
     """Move each master's skeleton onto the joints found in its drawing (ViTPose). Skipped for the stub model,
     for rigs other than the side view, and when the joint finder is not downloaded (the guide's joints are
@@ -148,30 +142,6 @@ def fit_masters(masters: list[Path], rig, model: str, stages) -> bool:
     for m, kp in zip(masters, kps):
         fit_master(m, kp, rig)
     return True
-
-
-def make_warp(master_json: Path, rig, out_dir: Path) -> Path:
-    """Build and save the warp rig of a (fitted) master."""
-    from PIL import Image
-
-    from ggs.rig.joints import bone_widths
-    from ggs.rig.master import load_master
-    from ggs.rig.skin import build_skin
-
-    spec, master, labels = load_master(master_json)
-    guide_labels = labels
-    guide_copy = Path(master_json).parent / "guide_labels_guide.png"
-    if guide_copy.exists():  # widths come from the guide's own shapes
-        import numpy as np
-
-        guide_labels = np.asarray(Image.open(guide_copy).convert("L")).astype(np.int16) - 1
-    widths = spec.fit.get("widths") or bone_widths(guide_labels, rig, spec.joints)
-    image = Image.fromarray(master, "RGBA")
-    skin = build_skin(rig, image, spec.joints, widths, spec.height_px)
-    k = skin.height_px / spec.height_px
-    if k < 1.0:
-        image = image.resize((round(image.width * k), round(image.height * k)), Image.LANCZOS)
-    return skin.save(out_dir, image)
 
 
 def make_slices(project: Path, ref: str, template: str, *, seeds: list[int] | None = None, profile: str = "lite",
@@ -272,13 +242,65 @@ def make_slices(project: Path, ref: str, template: str, *, seeds: list[int] | No
         for f in best.iterdir():
             if f.is_file():
                 shutil.copy2(f, out / f.name)
-    # the warp rig (bend the whole drawing): from the try that was cut best, else the first one
-    warp = None
-    if rig.view == "side" and tries:
-        pick = best.parent if best is not None else Path(max(tries, key=lambda t: t["score"])["folder"])
-        warp = make_warp(pick / "master.json", rig, out / "warp")
     (out / "slices.json").write_text(json.dumps({
         "format": "ggs.slices", "version": 1, "template": t.id, "rig": rig.id, "design": rec.accepted,
-        "passed": best is not None and not rough, "rough": rough, "tries": tries, "joints_fitted": fitted,
-        "warp": "warp/skin.json" if warp else None}, indent=1), encoding="utf-8")
+        "passed": best is not None and not rough, "rough": rough, "tries": tries, "joints_fitted": fitted}, indent=1), encoding="utf-8")
     return SliceResult(out / "character.yaml" if best is not None else None, tries, rough)
+
+
+def pieces_preview(item_dir: Path) -> Path | None:
+    """The sliced version's pieces only (the part sheet also holds copies of the head for expressions), in a
+    small grid: ``sliced/pieces.png``, remade when the part sheet changes."""
+    from PIL import Image
+
+    from ggs.paths import rigs_dir
+    from ggs.rig import load_rig_spec
+
+    d = sliced_dir(item_dir)
+    sheet, info = d / "parts.png", d / "character.yaml"
+    out = d / "pieces.png"
+    if not sheet.exists() or not info.exists():
+        return None
+    if out.exists() and out.stat().st_mtime >= sheet.stat().st_mtime:
+        return out
+    import yaml
+
+    rig = load_rig_spec(rigs_dir() / f"{(yaml.safe_load(info.read_text(encoding='utf-8')) or {})['rig']}.yaml")
+    ps = rig.part_sheet
+    img = Image.open(sheet).convert("RGBA")
+    c = img.width // ps.cols
+    cols = 3
+    rows = -(-len(ps.parts) // cols)
+    grid = Image.new("RGBA", (cols * c, rows * c), (0, 0, 0, 0))
+    for k, p in enumerate(ps.parts):
+        cell = img.crop((p.cell[0] * c, p.cell[1] * c, (p.cell[0] + 1) * c, (p.cell[1] + 1) * c))
+        grid.alpha_composite(cell, ((k % cols) * c, (k // cols) * c))
+    grid.save(out)
+    return out
+
+
+def sync_head_variants(item_dir: Path) -> None:
+    """After the head was touched up: the expression slots (blink, mouth open, hurt) are copies of the head
+    until expressions are drawn, so copy the new head into them."""
+    from PIL import Image
+
+    from ggs.paths import rigs_dir
+    from ggs.rig import load_rig_spec
+
+    d = sliced_dir(item_dir)
+    sheet, info = d / "parts.png", d / "character.yaml"
+    if not sheet.exists() or not info.exists():
+        return
+    import yaml
+
+    rig = load_rig_spec(rigs_dir() / f"{(yaml.safe_load(info.read_text(encoding='utf-8')) or {})['rig']}.yaml")
+    ps = rig.part_sheet
+    head = next((p for p in ps.parts if p.bone == "head"), None)
+    if head is None or not ps.head_variants:
+        return
+    img = Image.open(sheet).convert("RGBA")
+    c = img.width // ps.cols
+    cell = img.crop((head.cell[0] * c, head.cell[1] * c, (head.cell[0] + 1) * c, (head.cell[1] + 1) * c))
+    for v in ps.head_variants:
+        img.paste(cell, (v.cell[0] * c, v.cell[1] * c))
+    img.save(sheet)

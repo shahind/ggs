@@ -96,11 +96,22 @@ class MotionSpec(BaseModel):
     supervised: list[str]
 
 
+class FramesSpec(BaseModel):
+    """Pose-driven frames: SD 1.5 base, AnimateDiff motion adapter, OpenPose ControlNet, IP-Adapter folder."""
+
+    registry: str
+    base: list[str]
+    motion: list[str]
+    controlnet: list[str]
+    ip_adapter: list[str]
+
+
 class PipelinesFile(BaseModel):
     pipelines: dict[str, PipelineSpec]
     matting: dict[str, MattingSpec] = Field(default_factory=dict)
     captioning: dict[str, MattingSpec] = Field(default_factory=dict)  # same shape: registry id + paths
     pose: dict[str, MattingSpec] = Field(default_factory=dict)  # joint detectors (same shape)
+    frames: dict[str, FramesSpec] = Field(default_factory=dict)  # pose-driven frame models (AnimateDiff)
     motion: dict[str, MotionSpec] = Field(default_factory=dict)
 
 
@@ -183,6 +194,15 @@ def resolve_pose(name: str, dirs: list[Path] | None = None, spec_file: Pipelines
     if name not in spec_file.pose:
         raise ValueError(f"unknown pose model {name!r}; known: {sorted(spec_file.pose)}")
     return resolve(spec_file.pose[name].path, dirs or model_dirs(), f"pose model {name}")
+
+
+def resolve_frames(name: str, dirs: list[Path] | None = None, spec_file: PipelinesFile | None = None
+                   ) -> dict[str, Path]:
+    spec_file = spec_file or load_pipelines()
+    if name not in spec_file.frames:
+        raise ValueError(f"unknown frames model {name!r}; known: {sorted(spec_file.frames)}")
+    s, dirs = spec_file.frames[name], dirs or model_dirs()
+    return {k: resolve(getattr(s, k), dirs, f"{name} {k}") for k in ("base", "motion", "controlnet", "ip_adapter")}
 
 
 def _motion_spec(name: str, spec_file: PipelinesFile | None) -> MotionSpec:

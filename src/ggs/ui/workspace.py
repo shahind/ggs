@@ -2,7 +2,7 @@
 
 No chat and no stored versions: the history keeps how each drawing was made (``ggs.items``), so Previous / Next
 bring an earlier drawing back (from the cache, or drawn again). Regenerate sits by the picture: the same words,
-a new seed. Under the picture one prompt box (typos underlined) and two buttons: "Change it" edits the drawing on
+a new seed. Under the picture one prompt box and two buttons: "Change it" edits the drawing on
 screen, "Draw new" starts over from the words in the box.
 Characters add the body & pose editor, "Use this design", and the Sliced version and Animate tabs.
 """
@@ -32,8 +32,7 @@ from ggs.ui import commands as C
 from ggs.ui.icons import icon, pixmap
 from ggs.ui.jobs import Job, JobQueue, run_on_stage
 from ggs.ui.kinds import SIZE_LABELS, kind
-from ggs.ui.spell import PromptEdit
-from ggs.ui.widgets import ImageStage
+from ggs.ui.widgets import ImageStage, PromptEdit
 
 
 class Advanced(QFrame):
@@ -151,16 +150,6 @@ class DrawPanel(QWidget):
         col.addWidget(self.new)
         box.addLayout(col)
         lay.addLayout(box)
-        self.typos = QLabel("")
-        self.typos.setWordWrap(True)
-        self.typos.setStyleSheet("color: #ff8a8a;")
-        lay.addWidget(self.typos)
-        self.input.textChanged.connect(self._check_typos)
-
-    def _check_typos(self) -> None:
-        bad = self.input.has_typos()
-        self.typos.setText(("Check the spelling: " + ", ".join(bad) + " (right-click a word for fixes)")
-                           if bad else "")
 
     def _enter(self) -> None:
         (self._change if self.ws.rec.shown() else self._new)()

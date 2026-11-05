@@ -44,14 +44,37 @@ Cutting by the guide's shapes instead of the drawing's is what produced the defo
    - Hidden parts of a layer get the limb's own typical colour.
    - A skirt sways with the legs at 40 %.
    - Rendered with OpenCV and exported as sprite sheet + JSON, APNG, WebP or GIF.
-   - Made together with the sliced version (`sliced/warp/skin.json`).
-   - `ggs export clip.json --character <item>/sliced/warp/skin.json --format sheet`.
+   - Made straight from the accepted design (`ggs character warp`, `<item>/warp/skin.json`); no sliced version
+     needed (second review, below).
+   - `ggs export clip.json --character <item>/warp/skin.json --format sheet`.
    - On the clown: walk, run, punch and jump hold together and the skirt stays whole. The cut-out cannot do that
      for this character.
 5. **The cut-out improves too**, because it cuts the fitted ownership map: the skirt stays whole and the limbs are
    separate pieces. Reassembly overlap on the clown went from 0.80–0.84 to 0.81–0.87. The 0.90 bar is not
    reached because far limbs reuse the near limb's art, a rig design limit. The rough-cut fallback keeps the best
    try.
+
+## Second review (same day) and what changed
+- **Warp did not need the sliced version.** It is now built from the design itself: the design's skeleton,
+  fitted by the joint finder, with a mesh whose detail is chosen (coarse / normal / fine).
+- **Warp was slow.** It drew triangle by triangle in Python (about 0.45 s a frame). Now every triangle is
+  rasterised at once in numpy and sampled with one OpenCV remap per layer: about 25 ms a frame at game size.
+  Where triangles overlap at a bent knee, the one with art at that spot wins.
+- **The preview made a GIF first.** It is now a live editor (`ggs.ui.anim_editor`, for the warp and the
+  cut-out). Frames are drawn on demand at screen size, with play/pause, a timeline and key frames. Dragging a
+  hand, foot or the head touches up that frame, and the change fades into the frames around it. Touched-up
+  animations are kept with the character (`<item>/edits/`), so the export matches. Joints mode moves the warp's
+  joints and rebuilds it. Files are written only on export.
+- **Slicer pieces were wrong.** The causes were blob-shaped ownership, round joint caps, blurred fills, and
+  expression copies shown as extra heads. Ownership is now by outlined colour region: each region goes whole to
+  a limb or the trunk, and limbs are cut straight at the joints (the bisector of the bend). Pieces continue
+  under their neighbour across a joint using real art, and hidden areas get a flat colour. The preview shows
+  only the nine pieces.
+  - On the owner's boy character, two of three tries now pass validation (0.93 and 0.91; they were rough cuts).
+- **Touch-ups:** a paint editor (`ggs.ui.paint`) for the pieces and the warp picture. It has brush, eraser,
+  colour picker and flat fill, undo/redo and zoom, plus "Open in my image editor" for the system's default
+  image app.
+- **The spelling warning is gone** (pyspellchecker removed).
 
 ## Owner's idea 2 (front + side views): not built
 The joint finder already works well on the template poses, which keep the limbs apart. Fusing two views is worth

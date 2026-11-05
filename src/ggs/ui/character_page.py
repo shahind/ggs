@@ -356,6 +356,10 @@ class SlicedTab(QWidget):
         left.addWidget(self.make)
         from ggs.ui.errors import trash_icon
 
+        self.touch = QPushButton("Touch up the pieces")
+        self.touch.setToolTip("Paint over the pieces: brush, eraser, colour picker, fill")
+        self.touch.clicked.connect(self._touch_up)
+        left.addWidget(self.touch)
         self.delete = QPushButton("Delete sliced version")
         self.delete.setIcon(trash_icon(self))
         self.delete.clicked.connect(self._delete)
@@ -409,8 +413,9 @@ class SlicedTab(QWidget):
             if t.id == tid:
                 self.group.button(i).setChecked(True)
                 self.about.setText(t.about)
-        parts = sliced_dir(self.ws.dir) / "parts.png"
-        self.stage.set_image(parts if ok and parts.exists() else None)
+        from ggs.rig.slices import pieces_preview
+
+        self.stage.set_image(pieces_preview(self.ws.dir) if ok else None)
         stale = ok and info.get("design") != self.ws.rec.accepted
         self.status.setText("" if not ok else ("Made from an earlier design: make it again to match the new one."
                                                if stale else "The pieces of your character. Animate them in the "
@@ -428,6 +433,18 @@ class SlicedTab(QWidget):
         self.make.setText("Make it again" if ok else "Make sliced version")
         self.export.setEnabled(ok)
         self.delete.setVisible(sliced_dir(self.ws.dir).exists())
+        self.touch.setVisible(ok)
+
+    def _touch_up(self) -> None:
+        from ggs.rig.slices import sliced_dir, sync_head_variants
+        from ggs.ui.paint import PaintDialog
+
+        sheet = sliced_dir(self.ws.dir) / "parts.png"
+        dlg = PaintDialog(sheet, self, "Touch up the pieces")
+        if dlg.exec() and dlg.saved:
+            sync_head_variants(self.ws.dir)
+            self.refresh()
+            self.ws.changed.emit()
 
     def _delete(self) -> None:
         from ggs.items import ItemError, delete_sliced
@@ -528,24 +545,40 @@ class AnimateTab(QWidget):
 
 
 class CutoutPanel(QWidget):
-    """Animations played by the sliced version: the cut-out puppet, or (``warp``) the drawing bent in one piece."""
+    """Animations on the character, in a live editor: the drawing bent in one piece (``warp``) or the cut-out
+    puppet (the sliced version). Frames are only rendered to files on export."""
 
     def __init__(self, tab: AnimateTab, warp: bool = False):
         super().__init__()
+        from ggs.ui.anim_editor import AnimEditor
+
         self.warp = warp
         self.tab, self.ws = tab, tab.ws
         self.queue, self.project = tab.queue, tab.project
+        self._rig_key = None
         outer = QVBoxLayout(self)
         self.need = QFrame()
         self.need.setObjectName("panel")
         nl = QVBoxLayout(self.need)
         self.need_text = _muted("")
         nl.addWidget(self.need_text)
-        go = QPushButton("Make the sliced version")
-        go.setObjectName("primary")
-        go.clicked.connect(lambda: self.ws.show_tab(1))
-        nl.addWidget(go, 0, Qt.AlignmentFlag.AlignLeft)
-        outer.addWidget(self.need)
+        nrow = QHBoxLayout()
+        self.detail = QComboBox()
+        for label, d in (("Mesh: normal", "normal"), ("Mesh: fine (smoother bends)", "fine"),
+                         ("Mesh: coarse (faster)", "coarse")):
+            self.detail.addItem(label, d)
+        self.detail.setVisible(warp)
+        self.go = QPushButton("Get it ready to bend" if warp else "Make the sliced version")
+        self.go.setObjectName("primary")
+        self.go.clicked.connect(self._make_warp if warp else (lambda: self.ws.show_tab(1)))
+        nrow.addWidget(self.detail)
+        nrow.addWidget(self.go)
+        nrow.addStretch(1)
+        nl.addLayout(nrow)
+        self.need_stage = ImageStage()
+        self.need_stage.setVisible(False)
+        nl.addWidget(self.need_stage, 1)
+        outer.addWidget(self.need, 1)
         self.body = QWidget()
         lay = QHBoxLayout(self.body)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -555,10 +588,20 @@ class CutoutPanel(QWidget):
         self.list.current_changed.connect(self._show)
         self.list.removed.connect(self.ws.changed.emit)
         left.addWidget(self.list, 1)
+        if warp:
+            remake = QPushButton("Rebuild the bend rig")
+            remake.setToolTip("Find the joints again and lay a new mesh (after a new design, or another mesh size)")
+            remake.clicked.connect(self._make_warp)
+            left.addWidget(self.detail_again(remake))
+            touch = QPushButton("Touch up the picture")
+            touch.setToolTip("Paint over the drawing that is bent (brush, eraser, colour picker, fill)")
+            touch.clicked.connect(self._touch_up)
+            left.addWidget(touch)
         lay.addLayout(left, 2)
         right = QVBoxLayout()
-        self.movie = Movie("Pick an animation on the left")
-        right.addWidget(self.movie, 1)
+        self.editor = AnimEditor()
+        self.editor.edited.connect(self._edited)
+        right.addWidget(self.editor, 1)
         self.stage = ImageStage()
         self.stage.setVisible(False)
         right.addWidget(self.stage, 1)
@@ -580,50 +623,127 @@ class CutoutPanel(QWidget):
         lay.addLayout(right, 3)
         outer.addWidget(self.body, 1)
 
+    def detail_again(self, button: QPushButton) -> QWidget:
+        """The rebuild button with its own mesh-size choice (the first one sits on the 'get it ready' card)."""
+        w = QWidget()
+        row = QHBoxLayout(w)
+        row.setContentsMargins(0, 0, 0, 0)
+        self.detail2 = QComboBox()
+        for i in range(self.detail.count()):
+            self.detail2.addItem(self.detail.itemText(i), self.detail.itemData(i))
+        row.addWidget(self.detail2, 1)
+        row.addWidget(button)
+        return w
+
     def character(self) -> Path | None:
-        from ggs.rig.slices import sliced_character, warp_skin
+        from ggs.rig.slices import sliced_character
+        from ggs.rig.warp import warp_skin
 
         return warp_skin(self.ws.dir) if self.warp else sliced_character(self.ws.dir)
 
+    def _side(self, ch: Path) -> bool:
+        if self.warp:
+            return json.loads(ch.read_text(encoding="utf-8")).get("rig") == "humanoid_side_v1"
+        import yaml
+
+        return (yaml.safe_load(ch.read_text(encoding="utf-8")) or {}).get("rig") == "humanoid_side_v1"
+
     def refresh(self) -> None:
         ch = self.character()
-        side = False
-        if ch is not None:
-            if self.warp:
-                side = json.loads(ch.read_text(encoding="utf-8")).get("rig") == "humanoid_side_v1"
-            else:
-                import yaml
-
-                side = (yaml.safe_load(ch.read_text(encoding="utf-8")) or {}).get("rig") == "humanoid_side_v1"
+        side = ch is not None and self._side(ch)
         self.need.setVisible(not side)
         self.body.setVisible(side)
-        if ch is None:
-            self.need_text.setText(("Bending the drawing needs the sliced version (it finds the joints in a "
-                                    "drawing of your character with arms and legs apart). " if self.warp else
-                                    "Cut-out animation moves the sliced pieces of your character. ") +
-                                   "Make the sliced version first (it takes a few minutes).")
+        cs = self.ws.rec.settings.character
+        view = cs.view if cs else "side"
+        if ch is None and self.warp:
+            self.need_text.setText("Bending moves your design itself: its skeleton is fitted to the drawing and a "
+                                   "mesh is laid over it (a few seconds). Nothing is drawn again or cut apart."
+                                   + ("" if view == "side" else " The animations are side view: draw a side-view "
+                                      "design first."))
+            self.go.setEnabled(view == "side")
+        elif ch is None:
+            self.need_text.setText("Cut-out animation moves the sliced pieces of your character. Make the sliced "
+                                   "version first (it takes a few minutes).")
         elif not side:
             self.need_text.setText("This sliced version is front view; the animations are side view. Make a side "
                                    "view sliced version to animate it.")
         else:
+            key = (str(ch), ch.stat().st_mtime)
+            if key != self._rig_key:
+                from ggs.ui.anim_editor import PuppetRenderer, WarpRenderer
+
+                try:
+                    self.editor.set_renderer(WarpRenderer(ch) if self.warp else PuppetRenderer(ch))
+                    self._rig_key = key
+                except Exception as exc:  # noqa: BLE001 - a broken rig shows a message, not a crash
+                    from ggs.ui.errors import show_error
+
+                    show_error(self, str(exc), "Cannot show this character")
             self.list.reload()
 
-    def _show(self, row: dict | None) -> None:
-        ch = self.character()
-        if not row or ch is None:
-            return
+    def _touch_up(self) -> None:
         from PySide6.QtWidgets import QApplication
 
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        from ggs.rig.warp import move_joints, warp_skin
+        from ggs.ui.paint import PaintDialog
+
+        skin = warp_skin(self.ws.dir)
+        if skin is None:
+            return
+        dlg = PaintDialog(skin.parent / "skin.png", self, "Touch up the picture")
+        if dlg.exec() and dlg.saved:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            try:
+                move_joints(skin, {})  # same joints, new picture: rebuild the layers and mesh
+            finally:
+                QApplication.restoreOverrideCursor()
+            self._rig_key = None
+            self.refresh()
+
+    def _make_warp(self) -> None:
+        on_card = self.need.isVisible()
+        stage = self.need_stage if on_card else self.stage
+        combo = self.detail if on_card or not hasattr(self, "detail2") else self.detail2
+        job = Job(f"warp {self.ws.rec.name}", [C.character_warp(self.project, f"character/{self.ws.rec.name}",
+                                                                 combo.currentData() or "normal")])
+
+        def done(ok: bool) -> None:
+            stage.setVisible(False)
+            self.editor.setVisible(True)
+            self._rig_key = None
+            self.refresh()
+
+        job.done = done
+        stage.setVisible(True)
+        if stage is self.stage:
+            self.editor.setVisible(False)
+        run_on_stage(self.queue, job, stage)
+        stage.set_step("Finding the joints and laying the mesh...")
+
+    @staticmethod
+    def _key(row: dict) -> str:
+        return C.slug(row["name"], 40)
+
+    def _show(self, row: dict | None) -> None:
+        if not row or self.character() is None:
+            return
+        from ggs.rig.clip import load_clip
+        from ggs.rig.edits import edited_clip, edits_dir
+
+        key = self._key(row)
         try:
-            gif = preview_gif(ch, clip_for_row(row))
-            self.movie.play(gif)
+            path = edited_clip(self.ws.dir, key) or clip_for_row(row)
+            self.editor.set_clip(load_clip(path), key, edits_dir(self.ws.dir))
         except Exception as exc:  # noqa: BLE001 - a broken clip shows a message, not a crash
-            self.movie.play(None, f"Cannot show this one: {exc}")
-        finally:
-            QApplication.restoreOverrideCursor()
+            self.editor.canvas.set_content(None, text=f"Cannot show this one: {exc}")
+
+    def _edited(self, path) -> None:
+        if path is None:  # touch-ups undone: show the library version again
+            self._show(self.list.current())
 
     def _export(self) -> None:
+        from ggs.rig.edits import edited_clip
+
         rows = [it.data(ROW) for it in self.list.checked_items()]
         if not rows and self.list.current():
             rows = [self.list.current()]
@@ -638,11 +758,17 @@ class CutoutPanel(QWidget):
         if self.warp:
             base = base / "bent"
         engine = fmt in ("godot", "unity", "defold", "rig")
-        self.movie.setVisible(False)
+        touched = [edited_clip(self.ws.dir, self._key(r)) for r in rows]  # touch-ups win over the library
+        plain = [r for r, t in zip(rows, touched) if t is None]
+        mine = [t for t in touched if t is not None]
+        self.editor.setVisible(False)
         self.stage.setVisible(True)
 
         def go(clips: list[Path]) -> None:
+            clips = mine + clips
             if not clips:
+                self.stage.setVisible(False)
+                self.editor.setVisible(True)
                 return
             if engine or len(clips) > 1:
                 out = base / (fmt if engine else f"animations_{fmt}")
@@ -654,7 +780,7 @@ class CutoutPanel(QWidget):
 
             def done(ok: bool) -> None:
                 self.stage.setVisible(False)
-                self.movie.setVisible(True)
+                self.editor.setVisible(True)
                 self.list.reload()
                 if ok:
                     from ggs.ui.errors import show_saved
@@ -664,12 +790,12 @@ class CutoutPanel(QWidget):
 
             job.done = done
             run_on_stage(self.queue, job, self.stage)
-            self.stage.set_step("Exporting...")
+            self.stage.set_step("Rendering the frames...")
 
         class _Page:  # with_project_clips shows its progress on this panel's stage
             queue, project, stage = self.queue, self.project, self.stage
 
-        with_project_clips(_Page, rows, go)
+        with_project_clips(_Page, plain, go)
 
 
 class DrawnPanel(QWidget):

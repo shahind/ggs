@@ -14,6 +14,7 @@ where a near limb lies over the body the limb wins (it is drawn on top).
 
 from __future__ import annotations
 
+import itertools
 import math
 from pathlib import Path
 
@@ -337,3 +338,84 @@ def fit_master(master_json: str | Path, kp: dict, rig: RigSpec) -> dict:
                    "draw_order": legs_behind(rig.draw_order) if skirt else None}
     path.write_text(json.dumps(data, indent=1), encoding="utf-8")
     return report
+
+
+def chains(rig: RigSpec) -> list[list[str]]:
+    """Bone chains, parent to child: the trunk (root up to the head) and every near/far limb."""
+    from ggs.rig.retarget import limb_groups
+
+    groups = limb_groups(rig)
+    limbs = [list(g.near) for g in groups] + [list(g.far) for g in groups]
+    taken = {b for c in limbs for b in c}
+    trunk = [b.name for b in rig.bones if b.name not in taken]
+    return [trunk, *limbs]
+
+
+def _joint_cuts(chain: list[str], joints: Joints) -> list[tuple[np.ndarray, np.ndarray]]:
+    """For each joint between consecutive bones of a chain: (point, normal pointing to the child side). The cut
+    is the line through the joint along the bisector of the bend, as a rigger would cut."""
+    cuts = []
+    for a, b in itertools.pairwise(chain):
+        p = np.array(joints[b][0], np.float32)
+        da = np.array(joints[a][1], np.float32) - np.array(joints[a][0], np.float32)
+        db = np.array(joints[b][1], np.float32) - np.array(joints[b][0], np.float32)
+        n = da / max(np.linalg.norm(da), 1e-6) + db / max(np.linalg.norm(db), 1e-6)
+        if np.linalg.norm(n) < 1e-6:  # folded back on itself: cut across the child
+            n = db
+        cuts.append((p, n / max(np.linalg.norm(n), 1e-6)))
+    return cuts
+
+
+def split_along_chain(xs: np.ndarray, ys: np.ndarray, chain: list[str], joints: Joints) -> np.ndarray:
+    """Index into ``chain`` for each pixel: the bone between the joint cuts it lies."""
+    k = np.zeros(len(xs), np.int64)
+    pts = np.stack([xs, ys], axis=1).astype(np.float32)
+    for i, (p, n) in enumerate(_joint_cuts(chain, joints)):
+        k = np.where(((pts - p) @ n > 0) & (k == i), i + 1, k)
+    return k
+
+
+def region_labels(labels: np.ndarray, rgba: np.ndarray, rig: RigSpec, joints: Joints) -> np.ndarray:
+    """Clean ownership for flat game art: every outlined colour region goes to one limb (or the trunk), whole;
+    inside a limb the bones are split by straight cuts at the joints. ``labels`` (nearest bone by width) only
+    votes. A region shared by several limbs (no outline between them) is split by those votes first. Outline
+    pixels take the owner of the region next to them."""
+    from ggs.rig.cutter import nearest_labels
+
+    names = [b.name for b in rig.bones]
+    index = {n: i for i, n in enumerate(names)}
+    chain_list = chains(rig)
+    chain_of = np.full(len(names), -1, np.int64)
+    for c, ch in enumerate(chain_list):
+        for b in ch:
+            chain_of[index[b]] = c
+    mask = labels >= 0
+    ink = ink_mask(rgba[..., :3], mask)
+    regions, _n = colour_regions(rgba[..., :3], mask, ink)
+    from scipy import ndimage
+
+    out = np.full(labels.shape, -1, np.int16)
+    for k, sl in enumerate(ndimage.find_objects(regions), start=1):
+        if sl is None:
+            continue
+        r = regions[sl] == k
+        votes = chain_of[labels[sl][r]]
+        ys, xs = np.nonzero(r)
+        xs, ys = xs + sl[1].start, ys + sl[0].start
+        counts = np.bincount(votes[votes >= 0], minlength=len(chain_list))
+        top = int(np.argmax(counts))
+        whole = counts[top] >= 0.8 * len(votes)
+        per_px = np.full(len(xs), top) if whole else np.where(votes >= 0, votes, top)
+        lab = np.empty(len(xs), np.int16)
+        for c in np.unique(per_px):
+            sel = per_px == c
+            ch = chain_list[c]
+            lab[sel] = np.array([index[b] for b in ch])[split_along_chain(xs[sel], ys[sel], ch, joints)]
+        sub = out[sl]
+        sub[r] = lab
+    # cloth hanging from the waist (labelled by bone_labels) stays with the pelvis
+    root = next(i for i, b in enumerate(rig.bones) if b.parent is None)
+    out = np.where((labels == root) & ~ink & (out >= 0) & (chain_of[np.maximum(out, 0)] != chain_of[root]),
+                   root, out)
+    filled = nearest_labels(np.where(mask & ~ink, out, -1).astype(np.int16), mask)
+    return np.where(mask, filled, -1).astype(np.int16)

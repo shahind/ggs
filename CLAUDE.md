@@ -125,7 +125,8 @@ python -m ggs asset accept Hero --project <dir>                                #
 python -m ggs asset delete Hero --project <dir> [--current|--drawing N|--sliced|--frames walk]  # to the Recycle Bin
 python -m ggs motion remove wave --project <dir>; python -m ggs project delete <dir>
 python -m ggs character slice Hero --project <dir> --template side_simple      # sliced version (rigs/slice_templates.yaml)
-python -m ggs export walk.json --character <item>/sliced/warp/skin.json --format sheet --out walk.png  # warp: the drawing bent
+python -m ggs character warp Hero --project <dir> --detail normal   # warp rig from the design (<item>/warp/skin.json)
+python -m ggs export walk.json --character <item>/warp/skin.json --format sheet --out walk.png  # the design bent
 python -m ggs character frames Hero --project <dir> --clip motions/clips/walk.json --frames 8   # drawn frames
 python -m ggs export walk.json punch.json --character <item>/sliced/character.yaml --format godot --out build/hero
 python -m ggs export --character <item>/sliced/character.yaml --format unity --out build/parts  # parts only, no clips

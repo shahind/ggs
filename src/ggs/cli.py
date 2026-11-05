@@ -779,6 +779,22 @@ def cmd_character_slice(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_character_warp(args: argparse.Namespace) -> int:
+    """Build the warp rig (bend the drawing) from the character's accepted design."""
+    from ggs.items import ItemError
+    from ggs.pipeline.vram import Stages
+    from ggs.rig.warp import WarpError, make_design_warp
+
+    try:
+        out = make_design_warp(Path(args.project), args.item, args.detail, fit=not args.no_fit,
+                               stages=Stages(enforce=False))
+    except (ItemError, WarpError, ValueError, OSError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    print(f"wrote warp rig {out}")
+    return 0
+
+
 def cmd_character_frames(args: argparse.Namespace) -> int:
     from ggs.items import ItemError
     from ggs.pipeline.models import MissingModelError
@@ -789,13 +805,17 @@ def cmd_character_frames(args: argparse.Namespace) -> int:
     seeds = [args.seed + i for i in range(args.count)] if args.seed is not None else None
     try:
         out, results = make_frames(Path(args.project), args.item, args.clip, frames=args.frames, seeds=seeds,
-                                   profile=profile, enforce_vram=not args.no_vram_check, name=args.name)
+                                   profile=profile, enforce_vram=not args.no_vram_check, name=args.name,
+                                   method=args.method)
     except (ItemError, MissingModelError, VramBudgetError, ValueError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     except ImportError as exc:
         print(f'ERROR: {exc}. Install the GPU stack: see README ("gpu" extra).', file=sys.stderr)
         return 1
+    if not results:  # AnimateDiff: no per-frame pose checks
+        print(f"wrote frames {out}")
+        return 0
     best = results[0]
     print(f"wrote frames {out}: {best.passed}/{len(best.checks)} frames pass the checks")
     return 0 if best.passed == len(best.checks) else 2
@@ -1519,6 +1539,12 @@ def build_parser() -> argparse.ArgumentParser:
     char = sub.add_parser("character", help="character part sheets").add_subparsers(
         dest="character_cmd", required=True
     )
+    cw = char.add_parser("warp", help="warp rig from the accepted design: bend the drawing with its skeleton")
+    cw.add_argument("item")
+    cw.add_argument("--project", required=True)
+    cw.add_argument("--detail", default="normal", choices=["coarse", "normal", "fine"], help="mesh subdivision")
+    cw.add_argument("--no-fit", action="store_true", help="keep the design's skeleton (no joint finder)")
+    cw.set_defaults(func=cmd_character_warp)
     pa = char.add_parser("programmer-art", help="draw a placeholder part sheet + character.yaml")
     pa.add_argument("--out", required=True, help="output folder")
     pa.add_argument("--rig", default=str(DEFAULT_RIG))
@@ -1597,12 +1623,14 @@ def build_parser() -> argparse.ArgumentParser:
     cfr.add_argument("item", help="character item name in the project")
     cfr.add_argument("--project", required=True)
     cfr.add_argument("--clip", required=True, help="clip JSON (the project's animations folder)")
-    cfr.add_argument("--frames", type=int, default=8, help="2-16 frames, all drawn in one image")
+    cfr.add_argument("--frames", type=int, default=16, help="2-16 frames")
     cfr.add_argument("--name", default=None, help="folder name under <item>/frames (default: the clip's)")
     cfr.add_argument("--seed", type=int, default=None, help="first seed (default: the design's)")
     cfr.add_argument("--count", type=int, default=1, help="sheets to try; the best is kept")
     cfr.add_argument("--profile", choices=["standard", "lite"], default=None)
     cfr.add_argument("--no-vram-check", action="store_true")
+    cfr.add_argument("--method", default="auto", choices=["auto", "animatediff", "klein"],
+                     help="animatediff: pose-driven frame model (when downloaded); klein: one sheet of poses")
     cfr.set_defaults(func=cmd_character_frames)
     cc = char.add_parser("cut", help="cut a master.json into a part sheet and validate it (exit 2 if rejected)")
     cc.add_argument("master", help="master.json written by `ggs character master`")

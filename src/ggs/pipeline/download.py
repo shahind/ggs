@@ -70,6 +70,7 @@ def pack_ready(pack: Pack) -> bool:
         resolve_motion,
         resolve_motion_text,
         resolve_pipeline,
+        resolve_frames,
         resolve_pose,
     )
 
@@ -79,6 +80,8 @@ def pack_ready(pack: Pack) -> bool:
             resolve_pipeline(name, "lite", spec_file=spec)
         for name in pack.ready_when.get("matting", []):
             resolve_matting(name, spec_file=spec)
+        for name in pack.ready_when.get("frames", []):
+            resolve_frames(name, spec_file=spec)
         for name in pack.ready_when.get("pose", []):
             resolve_pose(name, spec_file=spec)
         for name in pack.ready_when.get("captioning", []):

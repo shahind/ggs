@@ -192,7 +192,7 @@ def build(dist: Path, skip_site: bool = False) -> Path:
 def check(app: Path) -> None:
     """The bundled Python must import everything from its own folder, never from the venv or the repo."""
     py = app / "python" / "python.exe"
-    code = ("import sys, ggs, torch, diffusers, transformers, PySide6.QtWidgets, PIL, spellchecker, cv2, ggs.paths as p;"
+    code = ("import sys, ggs, torch, diffusers, transformers, PySide6.QtWidgets, PIL, cv2, ggs.paths as p;"
             "print(sys.prefix); print(ggs.__file__); print(p.repo_root());"
             "print('torch', torch.__version__, 'cuda', torch.cuda.is_available())")
     out = subprocess.run([str(py), "-c", code], check=False, capture_output=True, text=True, cwd=str(app.parent))

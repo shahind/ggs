@@ -11,6 +11,7 @@ STAGES = {  # @stage <name> markers (GGS_PROGRESS=1) -> what the user sees
     "matte": "Cutting it out...",
     "cut": "Cutting it into pieces and checking them...",
     "joints": "Finding the joints...",
+    "animate": "Drawing the frames (a minute or two)...",
     "latents": "Preparing your images...",
     "train": "Training the style (this takes a while)...",
     "control": "Reading the pose...",

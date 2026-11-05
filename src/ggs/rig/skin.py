@@ -30,7 +30,8 @@ from ggs.rig.spec import RigSpec
 
 Point = tuple[float, float]
 Joints = dict[str, tuple[Point, Point]]
-GRID = 1 / 70  # mesh step in standing heights
+GRID = 1 / 70  # mesh step in standing heights ("normal" detail)
+DETAIL = {"coarse": 1 / 40, "normal": 1 / 70, "fine": 1 / 110}  # mesh subdivision levels
 WEIGHT_POWER = 4.0
 SKIRT_SHARE = 0.15  # cloth_share above this: the legs are drawn behind the body
 SKIRT_SWAY = 0.4  # how much of a leg's swing the skirt takes
@@ -91,16 +92,19 @@ def _capsule(shape, p0: Point, p1: Point, r: float) -> np.ndarray:
 
 class SkinRig:
     def __init__(self, rig: RigSpec, image: np.ndarray, joints: Joints, labels: np.ndarray, widths: dict[str, float],
-                 height_px: float):
+                 height_px: float, grid: float = GRID):
         from ggs.rig.cutter import fill_from
 
         if image.shape[:2] != labels.shape:
             raise SkinError("drawing and labels differ in size")
         self.rig, self.joints, self.widths, self.height_px = rig, joints, widths, float(height_px)
+        self.grid = grid
+        self.source = image  # the drawing (uint8 RGBA) the rig was made from
         self.bones = [b.name for b in rig.bones]
         self.index = {n: i for i, n in enumerate(self.bones)}
         self.parent = {b.name: b.parent for b in rig.bones}
         self.size = (image.shape[1], image.shape[0])
+        self._mips: dict[int, dict[float, np.ndarray]] = {}
         from ggs.rig.joints import cloth_share
 
         # a skirt or long coat hangs over the legs: draw both legs behind the body (and fill their tops under it)
@@ -159,7 +163,7 @@ class SkinRig:
     def _mesh(self, name: str, bones: list[str], img: np.ndarray, mask: np.ndarray) -> Layer:
         import cv2
 
-        step = max(4, round(GRID * self.height_px))
+        step = max(4, round(self.grid * self.height_px))
         grown = cv2.dilate(mask.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=2).astype(bool)
         ys, xs = np.nonzero(grown)
         x0, y0 = (xs.min() // step) * step, (ys.min() // step) * step
@@ -245,43 +249,51 @@ class SkinRig:
         rank = {n: k for k, n in enumerate(order)}
         return sorted(self.layers, key=lambda L: min(rank[b] for b in L.bones))
 
-    def render_frame(self, clip, frame: int, scale: float, size: tuple[int, int], offset: Point) -> np.ndarray:
-        """Premultiplied RGBA float32 frame: drawing pixels x ``scale``, shifted by ``offset`` (after scaling)."""
+    def _image(self, layer: Layer, scale: float) -> tuple[np.ndarray, float]:
+        """The layer's picture at about the size it is drawn (halved until close): (image, factor)."""
+        k = 1.0
+        while k * 0.5 >= scale and min(layer.image.shape[:2]) * k > 64:  # never smaller than the output
+            k *= 0.5
+        if k == 1.0:
+            return layer.image, 1.0
+        cache = self._mips.setdefault(id(layer), {})
+        if k not in cache:
+            import cv2
+
+            h, w = layer.image.shape[:2]
+            cache[k] = cv2.resize(layer.image, (max(1, round(w * k)), max(1, round(h * k))),
+                                  interpolation=cv2.INTER_AREA)
+        return cache[k], k
+
+    def render_pose(self, start: np.ndarray, ang: np.ndarray, swapped: dict[str, bool], scale: float,
+                    size: tuple[int, int], offset: Point) -> np.ndarray:
+        """Premultiplied RGBA float32: the drawing posed (bone starts and angles in drawing pixels) x ``scale``,
+        shifted by ``offset``. Every layer's triangles are rasterised at once (numpy) and sampled with one remap,
+        so a frame takes milliseconds."""
         import cv2
 
+        from ggs.rig.retarget import limb_groups, swap_draw_order
+
         out = np.zeros((size[1], size[0], 4), np.float32)
-        start, ang = self.pose(clip, frame)
-        rank = {n: k for k, n in enumerate(self.draw_order)}
-        for layer in self._order(clip, frame):
+        order = swap_draw_order(self.draw_order, limb_groups(self.rig), swapped)
+        rank = {n: k for k, n in enumerate(order)}
+        for layer in sorted(self.layers, key=lambda L: min(rank[b] for b in L.bones)):
             dst = self.deform(layer, start, ang) * scale + np.array(offset, np.float32)
-            src = layer.verts
-            order = np.argsort([rank[self.bones[b]] for b in layer.tri_bone], kind="stable")
-            for t in layer.tris[order]:
-                d = dst[t]
-                bx0, by0 = np.floor(d.min(0)).astype(int)
-                bx1, by1 = np.ceil(d.max(0)).astype(int) + 1
-                bx0, by0, bx1, by1 = max(bx0, 0), max(by0, 0), min(bx1, size[0]), min(by1, size[1])
-                if bx1 <= bx0 or by1 <= by0:
-                    continue
-                s = src[t]
-                sx0, sy0 = np.floor(s.min(0)).astype(int) - 1
-                sx1, sy1 = np.ceil(s.max(0)).astype(int) + 2
-                sx0, sy0 = max(sx0, 0), max(sy0, 0)
-                patch = layer.image[sy0:sy1, sx0:sx1]
-                m = cv2.getAffineTransform((s - (sx0, sy0)).astype(np.float32), (d - (bx0, by0)).astype(np.float32))
-                warped = cv2.warpAffine(patch, m, (bx1 - bx0, by1 - by0), flags=cv2.INTER_LINEAR,
-                                        borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
-                tri_mask = np.zeros((by1 - by0, bx1 - bx0), np.uint8)
-                cv2.fillConvexPoly(tri_mask, np.round(d - (bx0, by0)).astype(np.int32), 1)
-                if not tri_mask.any():
-                    continue
-                if warped.ndim == 2:
-                    warped = warped[..., None]
-                region = out[by0:by1, bx0:bx1]
-                keep = tri_mask.astype(bool)
-                a = warped[..., 3:4]
-                region[keep] = warped[keep] + region[keep] * (1.0 - a[keep])
+            tri_rank = np.array([rank[self.bones[b]] for b in layer.tri_bone])
+            img, k = self._image(layer, scale)
+            mapx, mapy = rasterize(dst, layer.verts * k, layer.tris[np.argsort(tri_rank, kind="stable")], size,
+                                   img[..., 3])
+            if mapx is None:
+                continue
+            warped = cv2.remap(img, mapx, mapy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT,
+                               borderValue=(0, 0, 0, 0))
+            out = warped + out * (1.0 - warped[..., 3:4])
         return out
+
+    def render_frame(self, clip, frame: int, scale: float, size: tuple[int, int], offset: Point) -> np.ndarray:
+        start, ang = self.pose(clip, frame)
+        swapped = {g: v[frame] for g, v in clip.swaps.items()} if clip.swaps else {}
+        return self.render_pose(start, ang, swapped, scale, size, offset)
 
     def render_clip(self, clip, height_px: int, padding: int = 2, in_place: bool = True) -> tuple[list, tuple[int, int]]:
         """Frames cropped to one shared box and the pivot (x under the root, y at the ground), like
@@ -317,14 +329,67 @@ class SkinRig:
 
     # ------------------------------------------------------------------ files
 
-    def save(self, out_dir: str | Path, image) -> Path:
+    def save(self, out_dir: str | Path, image=None) -> Path:
+        from PIL import Image
+
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
-        image.save(out / "skin.png")
+        (image or Image.fromarray(self.source, "RGBA")).save(out / "skin.png")
         data = {"format": "ggs.skin", "version": 1, "rig": self.rig.id, "image": "skin.png",
-                "height_px": self.height_px, "joints": self.joints, "widths": self.widths}
+                "height_px": self.height_px, "joints": self.joints, "widths": self.widths, "grid": self.grid}
         (out / "skin.json").write_text(json.dumps(data, indent=1), encoding="utf-8")
         return out / "skin.json"
+
+
+def rasterize(dst: np.ndarray, src: np.ndarray, tris: np.ndarray, size: tuple[int, int],
+              alpha: np.ndarray | None = None):
+    """For every output pixel covered by a triangle, where to sample the source: (mapx, mapy) float32 arrays for
+    ``cv2.remap`` (-1 outside), or (None, None) when nothing is covered. Where triangles overlap (a bent knee),
+    the one with art at that spot wins (``alpha``: the source's opacity), then the later one."""
+    w, h = size
+    d = dst[tris]  # (M, 3, 2)
+    x0 = np.clip(np.floor(d[..., 0].min(1)), 0, w - 1).astype(np.int64)
+    x1 = np.clip(np.ceil(d[..., 0].max(1)), 0, w - 1).astype(np.int64)
+    y0 = np.clip(np.floor(d[..., 1].min(1)), 0, h - 1).astype(np.int64)
+    y1 = np.clip(np.ceil(d[..., 1].max(1)), 0, h - 1).astype(np.int64)
+    e1, e2 = d[:, 1] - d[:, 0], d[:, 2] - d[:, 0]
+    det = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
+    keep = (np.abs(det) > 1e-6) & (x1 >= x0) & (y1 >= y0)
+    idx = np.nonzero(keep)[0]
+    if not len(idx):
+        return None, None
+    bw, bh = (x1 - x0 + 1)[idx], (y1 - y0 + 1)[idx]
+    n = bw * bh
+    tri = np.repeat(np.arange(len(idx)), n)
+    off = np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
+    px = x0[idx][tri] + off % bw[tri]
+    py = y0[idx][tri] + off // bw[tri]
+    t = idx[tri]
+    rx, ry = px - d[t, 0, 0], py - d[t, 0, 1]
+    inv = 1.0 / det[t]
+    u = (rx * e2[t, 1] - ry * e2[t, 0]) * inv
+    v = (ry * e1[t, 0] - rx * e1[t, 1]) * inv
+    eps = 1e-3
+    inside = (u >= -eps) & (v >= -eps) & (u + v <= 1 + eps)
+    px, py, t, u, v = px[inside], py[inside], t[inside], u[inside], v[inside]
+    s = src[tris[t]]
+    sx = s[:, 0, 0] + u * (s[:, 1, 0] - s[:, 0, 0]) + v * (s[:, 2, 0] - s[:, 0, 0])
+    sy = s[:, 0, 1] + u * (s[:, 1, 1] - s[:, 0, 1]) + v * (s[:, 2, 1] - s[:, 0, 1])
+    lin = py * w + px
+    prio = np.arange(len(lin), dtype=np.int64)
+    if alpha is not None:
+        ax = np.clip(np.round(sx).astype(np.int64), 0, alpha.shape[1] - 1)
+        ay = np.clip(np.round(sy).astype(np.int64), 0, alpha.shape[0] - 1)
+        prio += (alpha[ay, ax] > 0.5).astype(np.int64) * len(lin)
+    order = np.lexsort((prio, lin))
+    lin_sorted = lin[order]
+    ends = np.nonzero(np.r_[lin_sorted[1:] != lin_sorted[:-1], True])[0]
+    last = order[ends]  # per pixel: the triangle with art there, else the last drawn
+    mapx = np.full(h * w, -1.0, np.float32)
+    mapy = np.full(h * w, -1.0, np.float32)
+    mapx[lin[last]] = sx[last]
+    mapy[lin[last]] = sy[last]
+    return mapx.reshape(h, w), mapy.reshape(h, w)
 
 
 def vote_regions(labels: np.ndarray, rgba: np.ndarray, rig: RigSpec, joints: Joints,
@@ -384,17 +449,16 @@ def smooth_labels(labels: np.ndarray, size: int) -> np.ndarray:
 
 def drawing_labels(rgba: np.ndarray, rig: RigSpec, joints: Joints, widths: dict[str, float],
                    height_px: float) -> np.ndarray:
-    """Which bone owns each pixel of a drawing: nearest bone by width, cloth on the waist, outlined limb regions
-    kept whole, then smoothed."""
-    from ggs.rig.joints import bone_labels
+    """Which bone owns each pixel of a drawing: outlined colour regions go whole to a limb or the trunk, limbs are
+    cut straight at the joints, cloth hanging from the waist stays with the pelvis."""
+    from ggs.rig.joints import bone_labels, region_labels
 
     labels = bone_labels(rgba[..., 3], rig, joints, widths, rgb=rgba[..., :3])
-    labels = vote_regions(labels, rgba, rig, joints, widths)
-    return smooth_labels(labels, max(3, round(SMOOTH * height_px)) | 1)
+    return region_labels(labels, rgba, rig, joints)
 
 
 def build_skin(rig: RigSpec, image, joints: Joints, widths: dict[str, float], height_px: float,
-               max_height: float | None = 640.0) -> SkinRig:
+               max_height: float | None = 640.0, grid: float = GRID) -> SkinRig:
     """A SkinRig from a drawing (PIL RGBA). Large drawings are scaled to ``max_height`` px per standing height
     first (frames are made at game sizes; this keeps building and rendering quick)."""
     from PIL import Image
@@ -407,7 +471,7 @@ def build_skin(rig: RigSpec, image, joints: Joints, widths: dict[str, float], he
         height_px *= k
     arr = np.asarray(image.convert("RGBA"))
     labels = drawing_labels(arr, rig, joints, widths, height_px)
-    return SkinRig(rig, arr, joints, labels, widths, height_px)
+    return SkinRig(rig, arr, joints, labels, widths, height_px, grid)
 
 
 def load_skin(path: str | Path, rig: RigSpec | None = None) -> SkinRig:
@@ -423,4 +487,5 @@ def load_skin(path: str | Path, rig: RigSpec | None = None) -> SkinRig:
     rig = rig or load_rig_spec(rigs_dir() / f"{data['rig']}.yaml")
     joints = {b: (tuple(s), tuple(e)) for b, (s, e) in data["joints"].items()}
     image = Image.open(path.parent / data["image"]).convert("RGBA")
-    return build_skin(rig, image, joints, data["widths"], data["height_px"], max_height=None)
+    return build_skin(rig, image, joints, data["widths"], data["height_px"], max_height=None,
+                      grid=data.get("grid", GRID))

@@ -246,3 +246,19 @@ class ImageStage(QWidget):
             p.drawText(strip.adjusted(10, 0, -10, 0), int(Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap),
                        self.note)
         p.end()
+
+
+class PromptEdit(QPlainTextEdit):
+    """A short prompt box. Enter sends (``submitted``), Shift+Enter makes a new line."""
+
+    submitted = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setTabChangesFocus(True)
+
+    def keyPressEvent(self, e) -> None:
+        if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not e.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            self.submitted.emit()
+            return
+        super().keyPressEvent(e)

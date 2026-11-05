@@ -13,6 +13,7 @@ Several seeds are tried and the best sheet is exported.
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -265,8 +266,97 @@ def frames_dir(item_dir: Path) -> Path:
     return Path(item_dir) / "frames"
 
 
+def frames_method() -> str:
+    """'animatediff' when its models are downloaded, else 'klein' (the drawing model)."""
+    from ggs.pipeline.models import MissingModelError, resolve_frames
+
+    try:
+        resolve_frames(ANIMATEDIFF)
+        return "animatediff"
+    except (MissingModelError, ValueError):
+        return "klein"
+
+
+ANIMATEDIFF = "animatediff-sd15"
+AD_SIZE = (384, 512)
+
+
+def _design_lengths(d: Path) -> dict[str, float]:
+    from ggs.items import design_dir
+
+    sk = json.loads((design_dir(d) / "design_skeleton.json").read_text(encoding="utf-8"))
+    hp = float(sk["px_per_height"])
+    return {b["name"]: max(math.hypot(b["end"][0] - b["start"][0], b["end"][1] - b["start"][1]) / hp, 1e-3)
+            for b in sk["bones"]}
+
+
+def openpose_frames(rig, clip, idx: list[int], lengths: dict[str, float], size=AD_SIZE, fill: float = 0.78):
+    """One OpenPose image per frame index: the character's own proportions, in place, centred."""
+    from ggs.rig.pose import bone_defs, pose_bones
+    from ggs.rig.stick import openpose_image
+
+    w, h = size
+    scale = fill * h
+    out = []
+    for f in idx:
+        p = pose_bones(bone_defs(rig), clip, f, lengths, 1.0, True)
+        ys = [y for s_, e in p.values() for y in (s_[1], e[1])]
+        oy = h * 0.5 - (min(ys) + max(ys)) / 2 * scale
+        joints = {b: ((w / 2 + s_[0] * scale, oy + s_[1] * scale), (w / 2 + e[0] * scale, oy + e[1] * scale))
+                  for b, (s_, e) in p.items()}
+        out.append(openpose_image(joints, size, "side"))
+    return out
+
+
+def _animatediff_frames(d: Path, info: dict, clip, n: int, seed: int, profile: str, enforce_vram: bool):
+    """(RGBA frames cropped to one box, anchor, pose strip) drawn by AnimateDiff."""
+    import numpy as np
+    from PIL import Image
+
+    from ggs.generate import real_rgba
+    from ggs.items import design_dir
+    from ggs.pipeline.animatediff import AnimateDiffFrames
+    from ggs.pipeline.matting import BiRefNetMatter
+    from ggs.pipeline.models import load_pipelines, resolve_frames, resolve_matting
+    from ggs.pipeline.vram import Stages
+    from ggs.rig.poses import rig_for
+
+    rig = rig_for("side")
+    idx = frame_indices(clip, n)
+    poses = openpose_frames(rig, clip, idx, _design_lengths(d))
+    design = Image.open(design_dir(d) / "design.png").convert("RGBA")
+    ref = Image.new("RGB", design.size, "white")
+    ref.paste(design, mask=design.getchannel("A"))
+    who = "; ".join(info.get("text") or ["a character"])
+    prompt = (f"{who}, full body, side view, facing right, flat cartoon game character, clean outlines, plain white "
+              "background")
+    spec = load_pipelines()
+    stages = Stages(profile=profile, enforce=enforce_vram)
+    rgb = AnimateDiffFrames(resolve_frames(ANIMATEDIFF, spec_file=spec)).generate(
+        poses, ref, prompt, seed, AD_SIZE[0], AD_SIZE[1], stages)
+    alphas = BiRefNetMatter(resolve_matting("birefnet", spec_file=spec)).alphas(rgb, stages)
+    rgba = [Image.fromarray(real_rgba(im, a)[0], "RGBA") for im, a in zip(rgb, alphas, strict=True)]
+    box = None
+    for im in rgba:
+        bb = im.getchannel("A").point(lambda v: 255 if v > 24 else 0).getbbox()
+        if bb:
+            box = bb if box is None else (min(box[0], bb[0]), min(box[1], bb[1]), max(box[2], bb[2]), max(box[3], bb[3]))
+    if box is None:
+        raise ValueError("the frames came out empty")
+    pad = 4
+    box = (max(0, box[0] - pad), max(0, box[1] - pad), min(AD_SIZE[0], box[2] + pad), min(AD_SIZE[1], box[3] + pad))
+    frames = [im.crop(box) for im in rgba]
+    anchor = (round(AD_SIZE[0] / 2 - box[0]), box[3] - box[1] - pad)
+    strip = Image.new("RGB", (AD_SIZE[0] // 2 * len(poses), AD_SIZE[1] // 2))
+    for i, im in enumerate(poses):
+        strip.paste(im.resize((AD_SIZE[0] // 2, AD_SIZE[1] // 2)), (i * AD_SIZE[0] // 2, 0))
+    del np
+    return frames, anchor, strip
+
+
 def make_frames(project: Path, ref: str, clip_path: str | Path, *, frames: int = 8, seeds: list[int] | None = None,
-                profile: str = "lite", enforce_vram: bool = True, name: str | None = None) -> tuple[Path, list]:
+                profile: str = "lite", enforce_vram: bool = True, name: str | None = None,
+                method: str = "auto") -> tuple[Path, list]:
     """A character item's accepted design drawn in ``frames`` poses of a clip (all in one sheet, so they stay
     alike). Writes ``<item>/frames/<name>/``: frames/, <name>.png (APNG), <name>.webp, <name>_sheet.png + .json,
     poses.png and report.json. Returns (folder, results best first)."""
@@ -320,6 +410,24 @@ def make_frames(project: Path, ref: str, clip_path: str | Path, *, frames: int =
 
         spec.body = (BodyShape(**cs.body) if cs.body else PRESETS[cs.body_preset]).model_dump()
     (work / "master.json").write_text(json.dumps(spec.model_dump(), indent=1), encoding="utf-8")
+    method = frames_method() if method == "auto" else method
+    if method == "animatediff" and model != "stub":
+        progress.start("frames:animatediff", ["animate", "matte"])
+        seed = (seeds or [drawing["seed"]])[0]
+        fr, anchor, strip = _animatediff_frames(d, info, clip, min(frames, 16), seed, profile, enforce_vram)
+        fps = len(fr) / clip.duration
+        (out / "frames").mkdir()
+        for k, f in enumerate(fr):
+            f.save(out / "frames" / f"frame_{k:02d}.png")
+        save_apng(fr, out / f"{name}.png", fps, True)
+        save_webp(fr, out / f"{name}.webp", fps, True)
+        save_sprite_sheet(fr, anchor, out / f"{name}_sheet.png", name, fps, True)
+        strip.save(out / "poses.png")
+        (out / "report.json").write_text(json.dumps({
+            "format": "ggs.frames", "version": 1, "clip": str(clip_path), "frames": len(fr), "fps": round(fps, 3),
+            "seed": seed, "passed": True, "anchor": list(anchor), "method": "animatediff", "checks": []},
+            indent=1), encoding="utf-8")
+        return out, []
     progress.start(f"frames:{model}", ["encode", "denoise", "matte"])
     results = make_sprites(work / "master.json", clip_path, rig, work, seeds=seeds or [drawing["seed"]],
                            model=model, profile=profile, settings=settings_for(frames),

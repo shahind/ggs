@@ -309,6 +309,8 @@ def cut_parts(master: np.ndarray, guide_labels: np.ndarray, spec: MasterSpec, ri
     from ggs.rig.joints import ink_mask
 
     ink = ink_mask(rgb, alpha >= 128)
+    if spec.fit:  # joints found in the drawing: clean cuts (straight at the joints, real art overlapping)
+        return CutResult(labels, _clean_parts(master, labels, spec, rig, draw_order, ink), moved, labels != raw)
     parts: dict[str, CutPart] = {}
     for p in rig.part_sheet.parts:
         (sx, sy), (ex, ey) = spec.joints[p.bone]
@@ -354,6 +356,69 @@ def cut_parts(master: np.ndarray, guide_labels: np.ndarray, spec: MasterSpec, ri
         out[..., 3] = np.where(own, alpha, np.where(fill, 255, 0)).astype(np.uint8)
         parts[p.name] = CutPart(p, out, own, int(fill.sum()), angle, (sx, sy), length, widths, fill | tainted)
     return CutResult(labels, parts, moved, labels != raw)
+
+
+OVERLAP = 0.6  # how far (x the part's half-width) a part continues under its neighbour across a joint
+
+
+def _clean_parts(master: np.ndarray, labels: np.ndarray, spec: MasterSpec, rig: RigSpec, draw_order: list[str],
+                 ink: np.ndarray) -> dict[str, CutPart]:
+    """Parts from region/joint ownership (``ggs.rig.joints.region_labels``), no invented shapes:
+    - across each joint, the part drawn *below* continues a little under its neighbour, using the neighbour's
+      own art (what a rigger does by hand), so a bent elbow shows no gap;
+    - areas a part drawn above hides (the torso behind the near arm) get the part's main colour, flat;
+    - nothing else is added: no discs, no blur."""
+    index = {b.name: i for i, b in enumerate(rig.bones)}
+    order = {n: k for k, n in enumerate(draw_order)}
+    parent = {b.name: b.parent for b in rig.bones}
+    rgb, alpha = master[..., :3], master[..., 3]
+    on = alpha >= 128
+    widths = spec.fit.get("widths") or {}
+    yy, xx = np.mgrid[:labels.shape[0], :labels.shape[1]].astype(np.float32)
+
+    def band(bone: str, joint, toward) -> np.ndarray:
+        """Pixels of ``bone`` within OVERLAP x its half-width of ``joint``, on the side ``toward`` points to."""
+        w = max(widths.get(bone, 8.0), 3.0)
+        d = np.hypot(xx - joint[0], yy - joint[1])
+        side = (xx - joint[0]) * toward[0] + (yy - joint[1]) * toward[1]
+        return (labels == index[bone]) & on & (d <= (1.0 + OVERLAP) * w) & (side >= -1) & (side <= OVERLAP * w)
+
+    extra: dict[str, np.ndarray] = {b.name: np.zeros(labels.shape, bool) for b in rig.bones}
+    for b in rig.bones:
+        p = parent[b.name]
+        if p is None:
+            continue
+        j = spec.joints[b.name][0]
+        (s0, e0) = spec.joints[b.name]
+        dirc = np.array(e0, np.float32) - np.array(s0, np.float32)
+        dirc /= max(float(np.linalg.norm(dirc)), 1e-6)
+        if order[p] < order[b.name]:  # parent below: it continues into the child's start
+            extra[p] |= band(b.name, j, dirc)
+        else:  # child below: it continues back into the parent
+            extra[b.name] |= band(p, j, -dirc)
+    parts: dict[str, CutPart] = {}
+    for p in rig.part_sheet.parts:
+        (sx, sy), (ex, ey) = spec.joints[p.bone]
+        length = math.hypot(ex - sx, ey - sy)
+        angle = bone_angle((sx, sy), (ex, ey))
+        own = labels == index[p.bone]
+        if own.sum() < 20:
+            raise CutError(f"part {p.name!r}: almost no master pixels were labelled with it")
+        above = np.isin(labels, [index[n] for n in draw_order if order[n] > order[p.bone]])
+        hidden = np.zeros(labels.shape, bool)
+        if p.bone_far is None:  # trunk parts: what the near limbs drawn above them hide, inside their outline
+            hidden = convex_hull_mask(own) & above & on
+        hidden &= ~own
+        body = own | extra[p.bone]
+        paint = own & on & ~ink
+        flat = np.median(rgb[paint], axis=0) if paint.sum() > 10 else np.array([128, 128, 128])
+        out = np.zeros((*labels.shape, 4), np.uint8)
+        out[..., :3] = np.where(body[..., None], rgb, np.where(hidden[..., None], flat, 0)).astype(np.uint8)
+        out[..., 3] = np.where(body, alpha, np.where(hidden, 255, 0)).astype(np.uint8)
+        w = 2.0 * widths.get(p.bone, 8.0)
+        parts[p.name] = CutPart(p, out, own, int(hidden.sum()), angle, (sx, sy), length,
+                                {"start": w, "end": w}, hidden)
+    return parts
 
 
 # ---------------------------------------------------------------- normalize

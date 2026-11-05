@@ -138,6 +138,42 @@ entries:
     notes: "Model card header says MIT (checked 2026-11-03). Runs at 1024x1024, ~1.6 GB peak in fp16.
       Its remote code needs einops, kornia, timm. RMBG-2.0 (built on it) is CC BY-NC, do not use."
 
+  - id: dreamshaper-8
+    kind: base
+    name: DreamShaper 8 (Stable Diffusion 1.5 fine-tune)
+    license: CreativeML OpenRAIL-M
+    commercial: verify
+    min_vram_gb: 6
+    source: https://huggingface.co/Lykon/dreamshaper-8
+    notes: "OpenRAIL-M (use restrictions, commercial use of outputs allowed). Base for AnimateDiff frames."
+
+  - id: animatediff-motion-adapter-v1-5-3
+    kind: component
+    name: AnimateDiff motion adapter v1-5-3 (SD 1.5)
+    license: Apache-2.0
+    commercial: "yes"
+    min_vram_gb: 6
+    source: https://huggingface.co/guoyww/animatediff-motion-adapter-v1-5-3
+    notes: "Apache-2.0 per the AnimateDiff repo (check the model card before release). Spike 2026-11-05: 16 frames
+      at 384x512 with ControlNet OpenPose + IP-Adapter Plus, 75 s, 6.4 GB peak with model CPU offload."
+
+  - id: control-v11p-sd15-openpose
+    kind: component
+    name: ControlNet 1.1 OpenPose (SD 1.5)
+    license: CreativeML OpenRAIL-M
+    commercial: verify
+    min_vram_gb: 2
+    source: https://huggingface.co/lllyasviel/control_v11p_sd15_openpose
+
+  - id: ip-adapter-plus-sd15
+    kind: component
+    name: IP-Adapter Plus SD 1.5 + OpenCLIP ViT-H image encoder
+    license: Apache-2.0
+    commercial: "yes"
+    min_vram_gb: 2
+    source: https://huggingface.co/h94/IP-Adapter
+    notes: "Adapter Apache-2.0; the image encoder is LAION's OpenCLIP ViT-H-14 (MIT)."
+
   - id: vitpose-base-simple
     kind: segmentation
     name: ViTPose base (simple decoder), COCO 17 body keypoints

@@ -52,6 +52,16 @@ pose:
     registry: vitpose-base-simple
     path: [vitpose-base-simple]
 
+# Pose-driven frames (Animate > Drawn frames): SD 1.5 (DreamShaper 8) + AnimateDiff motion adapter + ControlNet
+# OpenPose + IP-Adapter Plus (with its image encoder in models/image_encoder).
+frames:
+  animatediff-sd15:
+    registry: animatediff-motion-adapter-v1-5-3
+    base: [dreamshaper-8]
+    motion: [animatediff-motion-adapter-v1-5-3]
+    controlnet: [control_v11p_sd15_openpose]
+    ip_adapter: [IP-Adapter]
+
 captioning:
   qwen3-vl-2b:
     registry: qwen3-vl-2b

@@ -90,7 +90,7 @@ def test_project_window_tree_and_workspace(qapp, tmp_path, settings):
     d = ws.draw
     assert d.change.isVisibleTo(ws) and d.new.text() == "Draw new" and d.regen.isEnabled()
     assert d.where.text() == "1 of 1" and not d.prev.isEnabled() and d.stage.pix is not None
-    assert d.input.toPlainText() == "a red potion"  # the prompt stays in the box (typos stay visible)
+    assert d.input.toPlainText() == "a red potion"  # the prompt stays in the box
     assert not hasattr(ws, "chat_lay") and not hasattr(d, "vars")  # no chat, no variations
     assert not ws.adv.isVisible()  # Advanced is closed by default
     v.model.setCurrentIndex(v.model.findData("flux2-klein-4b"))
@@ -165,15 +165,6 @@ def test_character_workspace_tabs_open_after_accept(qapp, tmp_path, settings):
     w.close()
 
 
-def test_spelling_marks_typos():
-    pytest.importorskip("spellchecker")
-    from ggs.ui.spell import suggestions, unknown_words
-
-    assert unknown_words("a little clawn boy with exagarated eyes") == {"clawn", "exagarated"}
-    assert unknown_words("a chibi knight sprite, GGSINK style") == set()
-    assert suggestions("clawn")[0] == "clown"
-
-
 def test_progress_estimates_from_stage_times(tmp_path, monkeypatch):
     import time
 
@@ -238,3 +229,53 @@ def test_long_texts_do_not_widen_the_window(qapp, tmp_path, settings):
     hint = w.minimumSizeHint()
     assert hint.width() <= 1250 and hint.height() <= 720, hint
     w.close()
+
+
+def test_live_editor_plays_and_touches_up(qapp, tmp_path):
+    from ggs import items as I
+    from ggs.rig.clip import load_clip
+    from ggs.rig.library import library_clip
+    from ggs.rig.warp import make_design_warp
+    from ggs.style.package import init_project
+    from ggs.ui.anim_editor import AnimEditor, WarpRenderer
+
+    walk = library_clip("walk")
+    if not walk.exists():
+        pytest.skip("motion library not built")
+    p = tmp_path / "g"
+    init_project(p, "G")
+    I.create(p, "character", "Hero", "a hero", I.ItemSettings(character=I.CharacterSettings(view="side", pose="idle")))
+    I.generate(p, "Hero", action="new", model="stub", enforce_vram=False)
+    I.accept(p, "Hero")
+    ed = AnimEditor()
+    ed.resize(600, 600)
+    ed.set_renderer(WarpRenderer(make_design_warp(p, "Hero", "coarse", fit=False)))
+    ed.set_clip(load_clip(walk), "walk", tmp_path / "edits")
+    for f in (0, 3, 7):
+        ed.slider.setValue(f)
+    assert ed.canvas.image is not None and not ed.canvas.image.isNull() and ed.canvas.handles
+    key = next(k for k in ed.canvas.handles if k.startswith("hand"))
+    pos = ed.canvas.handles[key]
+    from PySide6.QtCore import QPointF
+
+    ed._dragged(key, QPointF(pos.x() + 20, pos.y() - 30))
+    assert (tmp_path / "edits" / "walk.json").exists()  # the touched-up clip is kept for export
+    ed.modes.button(1).click()
+    assert ed.canvas.handles  # joints mode: the design with its joints
+
+
+def test_paint_dialog_fills_and_saves(qapp, tmp_path):
+    from PIL import Image
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QColor
+
+    from ggs.ui.paint import PaintDialog
+
+    f = tmp_path / "p.png"
+    Image.new("RGBA", (40, 40), (200, 30, 30, 255)).save(f)
+    dlg = PaintDialog(f)
+    dlg.canvas.colour = QColor(0, 0, 255)
+    dlg.canvas._snapshot()
+    dlg.canvas._fill(QPointF(5, 5))
+    dlg._save()
+    assert Image.open(f).convert("RGBA").getpixel((20, 20)) == (0, 0, 255, 255)

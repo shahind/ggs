@@ -108,16 +108,16 @@ def test_legs_go_behind_a_skirt(rig):
     assert max(order.index(b) for b in order if b.startswith(("thigh", "shin", "foot"))) < order.index("pelvis")
 
 
-def test_slicing_makes_a_warp_rig_that_exports(tmp_path):
+def test_warp_from_the_design_exports(tmp_path):
     from ggs.rig.library import library_clip
-    from ggs.rig.slices import make_slices, warp_skin
+    from ggs.rig.warp import make_design_warp, warp_skin
 
     p = tmp_path / "g"
     init_project(p, "G")
     I.create(p, "character", "Hero", "a hero", I.ItemSettings(character=I.CharacterSettings(view="side", pose="idle")))
     I.generate(p, "Hero", action="new", model="stub", enforce_vram=False)
     I.accept(p, "Hero")
-    make_slices(p, "Hero", "side_simple", enforce_vram=False)
+    make_design_warp(p, "Hero", "coarse", fit=False)  # straight from the design, no sliced version
     d = p / "items" / "character" / "hero"
     skin = warp_skin(d)
     assert skin is not None and json.loads(skin.read_text(encoding="utf-8"))["format"] == "ggs.skin"
@@ -130,3 +130,68 @@ def test_slicing_makes_a_warp_rig_that_exports(tmp_path):
     assert out.exists() and out.with_suffix(".json").exists()
     assert main(["export", str(walk), "--character", str(skin), "--format", "godot", "--out",
                  str(tmp_path / "g2")]) == 1  # warp animations are pictures
+
+
+def test_joint_cuts_split_a_limb_straight(rig, guide):
+    from ggs.rig.joints import split_along_chain
+
+    j = guide.spec.joints
+    chain = ["upper_arm_near", "forearm_near", "hand_near"]
+    pts = [j["upper_arm_near"][0], j["forearm_near"][0], j["hand_near"][0], j["hand_near"][1]]
+    mids = [((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) for a, b in zip(pts, pts[1:], strict=False)]
+    xs = np.array([m[0] for m in mids])
+    ys = np.array([m[1] for m in mids])
+    assert list(split_along_chain(xs, ys, chain, j)) == [0, 1, 2]  # each bone's middle is on its own side
+
+
+def test_clean_cut_from_fitted_joints(rig, guide, tmp_path):
+    """A master whose joints were fitted is cut along straight joint lines with real overlapping art: no discs,
+    no blur, and it rebuilds the drawing."""
+    from ggs.rig.joints import fit_master
+    from ggs.rig.make import cut_master
+    from ggs.rig.master import save_master
+
+    m = save_master(tmp_path / "m", guide.spec, guide.image, guide)
+    fit_master(m, _kp(guide.spec.joints), rig)
+    spec = json.loads(m.read_text(encoding="utf-8"))
+    assert spec["fit"]["skirt"] is False
+    res = cut_master(m, rig, tmp_path / "c", "Puppet")
+    iou = next(c for c in res.report.checks if c.name == "reassembly_iou").value
+    assert res.character is not None and iou > 0.9, res.report.checks
+
+
+def test_touch_up_turns_a_bone_and_its_children():
+    from ggs.rig.edits import turn_bone
+    from ggs.rig.library import library_clip
+    from ggs.rig.clip import load_clip
+
+    path = library_clip("walk")
+    if not path.exists():
+        pytest.skip("motion library not built")
+    clip = load_clip(path)
+    rig = load_rig_spec(rigs_dir() / f"{clip.rig}.yaml")
+    parents = {b.name: b.parent for b in rig.bones}
+    new = turn_bone(clip, parents, "upper_arm_near", 5, 30.0, spread=2)
+    assert new.angles["upper_arm_near"][5] == pytest.approx(clip.angles["upper_arm_near"][5] + 30)
+    assert new.angles["hand_near"][5] == pytest.approx(clip.angles["hand_near"][5] + 30)  # carried along
+    assert new.angles["torso"][5] == clip.angles["torso"][5]
+    assert 0 < new.angles["upper_arm_near"][6] - clip.angles["upper_arm_near"][6] < 30  # fades out
+    assert new.angles["upper_arm_near"][9] == clip.angles["upper_arm_near"][9]
+
+
+def test_moving_a_joint_rebuilds_the_rig(tmp_path):
+    from ggs.rig.warp import make_design_warp, move_joints
+
+    p = tmp_path / "g"
+    init_project(p, "G")
+    I.create(p, "character", "Hero", "a hero", I.ItemSettings(character=I.CharacterSettings(view="side", pose="idle")))
+    I.generate(p, "Hero", action="new", model="stub", enforce_vram=False)
+    I.accept(p, "Hero")
+    skin_json = make_design_warp(p, "Hero", "coarse", fit=False)
+    before = json.loads(skin_json.read_text(encoding="utf-8"))["joints"]
+    elbow = before["forearm_near"][0]
+    rebuilt = move_joints(skin_json, {"forearm_near": (elbow[0] + 5, elbow[1] + 3)})
+    after = json.loads(skin_json.read_text(encoding="utf-8"))["joints"]
+    assert after["forearm_near"][0] == pytest.approx([elbow[0] + 5, elbow[1] + 3])
+    assert after["upper_arm_near"][1] == pytest.approx(after["forearm_near"][0])  # the upper arm ends there too
+    assert rebuilt.layers

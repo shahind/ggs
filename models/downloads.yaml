@@ -34,6 +34,29 @@ packs:
       - repo: usyd-community/vitpose-base-simple
         dir: vitpose-base-simple
         include: ["*.json", "*.safetensors"]
+  frames:
+    label: Frame animator (AnimateDiff + OpenPose, optional)
+    why: Draws a character's animation frame by frame, following the skeleton and keeping the design.
+    required: false
+    size_gb: 6.2
+    ready_when: {frames: [animatediff-sd15]}
+    parts:
+      - repo: Lykon/dreamshaper-8
+        dir: dreamshaper-8
+        include: ["model_index.json", "scheduler/*", "tokenizer/*", "feature_extractor/*", "text_encoder/config.json",
+                  "text_encoder/model.fp16.safetensors", "unet/config.json",
+                  "unet/diffusion_pytorch_model.fp16.safetensors", "vae/config.json",
+                  "vae/diffusion_pytorch_model.fp16.safetensors"]
+      - repo: guoyww/animatediff-motion-adapter-v1-5-3
+        dir: animatediff-motion-adapter-v1-5-3
+        include: ["config.json", "diffusion_pytorch_model.fp16.safetensors"]
+      - repo: lllyasviel/control_v11p_sd15_openpose
+        dir: control_v11p_sd15_openpose
+        include: ["config.json", "diffusion_pytorch_model.fp16.safetensors"]
+      - repo: h94/IP-Adapter
+        dir: IP-Adapter
+        include: ["models/ip-adapter-plus_sd15.safetensors", "models/image_encoder/config.json",
+                  "models/image_encoder/model.safetensors"]
   sdxl:
     label: SDXL (optional second drawing model)
     why: Faster style training; a different look. (Its 8-step Lightning LoRA comes with the installer.)
