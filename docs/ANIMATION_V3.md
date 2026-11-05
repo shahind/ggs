@@ -97,3 +97,27 @@ Recommendation: spike AnimateDiff + ControlNet OpenPose + IP-Adapter in diffuser
 
 MimicMotion is the fallback if identity drifts too much: it is stronger, but slower and not diffusers. The extra
 downloads are about 6–8 GB (SD 1.5, motion adapter, OpenPose ControlNet, IP-Adapter + image encoder).
+
+## Third review (same day)
+- **Warp:**
+  - The editor opens on Joints until the user confirms them.
+  - Playback and export can start with a lead-in from the drawing's pose into the clip's first frame
+    (`ggs export --lead-in 0.4`).
+  - The far arm and leg always stay behind: clip near/far swaps are ignored for characters.
+  - Sleeves now move with the arms. A shirt area shared with the arms no longer goes whole to the torso.
+- **Slicer:** the triangles, the neck in the torso and the flat-colour shapes came from three rules.
+  - Inside a limb, outlined areas were cut by the joint lines. Now an area one bone owns stays whole.
+  - The neck was cut at the shoulder line. Now face skin, hair and hat go with the head.
+  - Invented fills are gone. Overlap at joints uses only the same material.
+  - Body parsing (SegFormer-B2, ATR labels, MIT) handles soft-shaded and 3D-rendered art, where colour areas
+    fail. The owner's 3D boy: all 3 tries pass with clean shoe, shin, forearm and hand pieces.
+- **AnimateDiff, second try** (pose strength 1.2, reference 0.5, motion in the prompt, props in the negative
+  prompt):
+  - The walk follows the legs, but an extra object appears (IP-Adapter reads the hat brim as a bag).
+  - The punch still keeps the arms still.
+  - Conclusion: SD 1.5 AnimateDiff does not follow side-view arm motion. MimicMotion is the next candidate.
+- **UI:**
+  - The pieces open in an embedded editor with Open With for installed open-source editors (Krita, GIMP,
+    Pixelorama, LibreSprite, Paint.NET), reloaded when saved there.
+  - Generated Frames previews the skeleton animation at the chosen frame count.
+  - Enterprise-style wording, with explanations in tooltips.

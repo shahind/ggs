@@ -51,6 +51,9 @@ pose:
   vitpose-base-simple:
     registry: vitpose-base-simple
     path: [vitpose-base-simple]
+  segformer-b2-clothes:  # body parsing: face, hair, hat, arm/leg skin, shoes, clothes (ggs.rig.parsing)
+    registry: segformer-b2-clothes
+    path: [segformer-b2-clothes]
 
 # Pose-driven frames (Animate > Drawn frames): SD 1.5 (DreamShaper 8) + AnimateDiff motion adapter + ControlNet
 # OpenPose + IP-Adapter Plus (with its image encoder in models/image_encoder).

@@ -195,8 +195,18 @@ def asset_accept(project: Path, item: str) -> list[str]:
     return [*GGS, "asset", "accept", item, "--project", str(project)]
 
 
-def character_slice(project: Path, item: str, template: str) -> list[str]:
-    return [*GGS, "character", "slice", item, "--project", str(project), "--template", template]
+def character_slice(project: Path, item: str, template: str = "side_simple", layout: str = "auto",
+                    extras: list[str] | None = None, recut: bool = False) -> list[str]:
+    a = [*GGS, "character", "slice", item, "--project", str(project), "--template", template, "--layout", layout]
+    if extras is not None:
+        a += ["--extras", ",".join(extras) or "none"]
+    if recut:
+        a.append("--recut")
+    return a
+
+
+def export_lead_in(cmd: list[str], seconds: float) -> list[str]:
+    return [*cmd, "--lead-in", str(seconds)] if seconds else cmd
 
 
 def character_warp(project: Path, item: str, detail: str = "normal") -> list[str]:

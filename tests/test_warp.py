@@ -9,6 +9,8 @@ import pytest
 pytest.importorskip("PIL")
 pytest.importorskip("cv2")
 
+import itertools
+
 from ggs import items as I
 from ggs.cli import main
 from ggs.paths import rigs_dir
@@ -138,7 +140,7 @@ def test_joint_cuts_split_a_limb_straight(rig, guide):
     j = guide.spec.joints
     chain = ["upper_arm_near", "forearm_near", "hand_near"]
     pts = [j["upper_arm_near"][0], j["forearm_near"][0], j["hand_near"][0], j["hand_near"][1]]
-    mids = [((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) for a, b in zip(pts, pts[1:], strict=False)]
+    mids = [((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) for a, b in itertools.pairwise(pts)]
     xs = np.array([m[0] for m in mids])
     ys = np.array([m[1] for m in mids])
     assert list(split_along_chain(xs, ys, chain, j)) == [0, 1, 2]  # each bone's middle is on its own side
@@ -161,9 +163,9 @@ def test_clean_cut_from_fitted_joints(rig, guide, tmp_path):
 
 
 def test_touch_up_turns_a_bone_and_its_children():
+    from ggs.rig.clip import load_clip
     from ggs.rig.edits import turn_bone
     from ggs.rig.library import library_clip
-    from ggs.rig.clip import load_clip
 
     path = library_clip("walk")
     if not path.exists():

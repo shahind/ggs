@@ -14,8 +14,8 @@ import json
 import re
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QIcon, QMovie, QPixmap
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QMovie, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -44,12 +44,9 @@ ANIM_FORMATS = [*ENGINE_FORMATS, ("GIF (one per animation)", "gif"), ("Animated 
 WARP_FORMATS = [("Sprite sheets + JSON (Godot, Unity, Defold)", "sheet"), ("Animated PNG", "apng"), ("WebP", "webp"),
                 ("GIF (one per animation)", "gif")]
 ADDED = re.compile(r"^added (.+\.json)\s*$")
-METHODS = [("Bend the drawing", ("The whole drawing bends with the skeleton: smooth elbows and knees, nothing cut "
-                                 "apart. Best for simple characters; exported as pictures or sprite sheets.")),
-           ("Cut-out pieces", ("The sliced pieces move like a puppet: any animation from the library, instantly, "
-                               "and they stay editable in your engine.")),
-           ("Drawn frames", ("The drawing model draws the character in every frame of one animation: clothes and hair "
-                            "move naturally; takes a few minutes per animation."))]
+METHODS = [("Warp", "Deforms the whole drawing with the skeleton. Exports pictures and sprite sheets."),
+           ("Cut-Out", "Moves the sliced pieces like a puppet. Exports engine rigs and pictures."),
+           ("Generated Frames", "Draws every frame with the pose-driven frame model.")]
 
 
 def _h(text: str) -> QLabel:
@@ -84,7 +81,7 @@ class MotionList(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Search animations: walk, punch, angry, dance...")
+        self.search.setPlaceholderText("Search")
         lay.addWidget(self.search)
         self.list = QListWidget()
         if multi:
@@ -289,6 +286,41 @@ def preview_gif(character_yaml: Path, clip_path: Path, height: int = 230, second
     return out
 
 
+class FramePlayer(QLabel):
+    """Plays a list of PIL frames in a loop at ``fps`` (the drawn-frames skeleton preview)."""
+
+    def __init__(self, text: str = ""):
+        super().__init__(text)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setMinimumSize(260, 260)
+        self.setStyleSheet("background: #111216; border-radius: 8px; color: #8a8d9a;")
+        self.pix: list[QPixmap] = []
+        self.k = 0
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._next)
+
+    def set_frames(self, frames: list, fps: float, text: str = "") -> None:
+        from PIL.ImageQt import ImageQt
+
+        self.timer.stop()
+        self.pix = [QPixmap.fromImage(ImageQt(f.convert("RGBA"))) for f in frames]
+        self.k = 0
+        if not self.pix:
+            self.setPixmap(QPixmap())
+            self.setText(text)
+            return
+        self.timer.start(max(30, round(1000 / max(fps, 0.5))))
+        self._next()
+
+    def _next(self) -> None:
+        if not self.pix:
+            return
+        pm = self.pix[self.k % len(self.pix)]
+        self.setPixmap(pm.scaled(self.width() - 12, self.height() - 12, Qt.AspectRatioMode.KeepAspectRatio,
+                                 Qt.TransformationMode.SmoothTransformation))
+        self.k += 1
+
+
 class Movie(QLabel):
     """Plays a GIF centred in a white card; shows text when there is none."""
 
@@ -323,136 +355,138 @@ class Movie(QLabel):
 
 
 class SlicedTab(QWidget):
+    """Layout, generation and export on the left; the pieces open in an image editor on the right."""
+
+    LAYOUTS: tuple = (("Suggested", "auto"), ("Chibi", "chibi"), ("Standard", "standard"), ("Tall", "tall"),
+               ("Front View", "front"))
+    EXTRAS: tuple = (("Long Hair", "hair_back"), ("Skirt / Dress", "skirt"), ("Cape", "cape"))
+
     def __init__(self, ws):
         super().__init__()
-        from ggs.rig.slices import load_templates, template_preview
+        from PySide6.QtWidgets import QCheckBox, QFormLayout, QGroupBox
+
+        from ggs.ui.errors import trash_icon
+        from ggs.ui.paint import ImageEditor
 
         self.ws = ws
         self.queue, self.project = ws.queue, ws.project
         lay = QHBoxLayout(self)
         left = QVBoxLayout()
-        left.addWidget(_h("1. Pick a layout"))
-        left.addWidget(_muted("The character is drawn again with arms and legs apart, its joints are found, and it "
-                              "is cut into these pieces. The same drawing is used to bend it in one piece."))
-        self.group = QButtonGroup(self)
-        self.templates = load_templates()
-        for i, t in enumerate(self.templates):
-            b = QPushButton()
-            b.setObjectName("tile")
-            b.setCheckable(True)
-            b.setIcon(QIcon(QPixmap(str(template_preview(t, 200)))))
-            b.setIconSize(QSize(120, 90))
-            b.setText(f"  {t.label}")
-            b.setToolTip(t.about)
-            b.setStyleSheet("text-align: left; padding: 6px;")
-            self.group.addButton(b, i)
-            left.addWidget(b)
-        self.group.button(0).setChecked(True)
-        self.group.idClicked.connect(self._picked)
-        self.about = _muted(self.templates[0].about)
-        left.addWidget(self.about)
-        self.make = QPushButton("Make sliced version")
+        box = QGroupBox("Layout")
+        form = QFormLayout(box)
+        self.layout_box = QComboBox()
+        for label, key in self.LAYOUTS:
+            self.layout_box.addItem(label, key)
+        self.layout_box.setToolTip("Body layout: neck, trunk and hands. Suggested is measured from the drawing.")
+        self.layout_box.currentIndexChanged.connect(self._layout_changed)
+        form.addRow("Body", self.layout_box)
+        self.extras: dict[str, QCheckBox] = {}
+        for label, key in self.EXTRAS:
+            cb = QCheckBox(label)
+            self.extras[key] = cb
+            form.addRow("", cb)
+        left.addWidget(box)
+        self.make = QPushButton("Generate")
         self.make.setObjectName("primary")
+        self.make.setToolTip("Draw the character in the layout's pose and cut it into pieces")
         self.make.clicked.connect(self._make)
         left.addWidget(self.make)
-        from ggs.ui.errors import trash_icon
-
-        self.touch = QPushButton("Touch up the pieces")
-        self.touch.setToolTip("Paint over the pieces: brush, eraser, colour picker, fill")
-        self.touch.clicked.connect(self._touch_up)
-        left.addWidget(self.touch)
-        self.delete = QPushButton("Delete sliced version")
-        self.delete.setIcon(trash_icon(self))
-        self.delete.clicked.connect(self._delete)
-        left.addWidget(self.delete)
-        left.addStretch(1)
-        left.addWidget(_h("Export the sliced version"))
-        left.addWidget(_muted("The pieces and the skeleton on their own, for your engine (no animations needed)."))
-        row = QHBoxLayout()
+        self.apply = QPushButton("Apply Layout")
+        self.apply.setToolTip("Cut the existing drawings again with this layout (no new drawing)")
+        self.apply.clicked.connect(self._apply)
+        left.addWidget(self.apply)
+        exp = QGroupBox("Export")
+        ef = QFormLayout(exp)
         self.fmt = QComboBox()
         for label, f in ENGINE_FORMATS:
             self.fmt.addItem(label, f)
         self.height = QSpinBox()
         self.height.setRange(32, 2048)
         self.height.setValue(256)
-        self.height.setSuffix(" px tall")
-        row.addWidget(self.fmt, 1)
-        row.addWidget(self.height)
-        left.addLayout(row)
-        self.export = QPushButton("Export")
-        self.export.setIcon(QIcon())
+        self.height.setSuffix(" px")
+        ef.addRow("Format", self.fmt)
+        ef.addRow("Height", self.height)
+        self.export = QPushButton("Export...")
         self.export.clicked.connect(self._export)
-        left.addWidget(self.export)
+        ef.addRow(self.export)
+        left.addWidget(exp)
+        left.addStretch(1)
+        self.status = _muted("")
+        left.addWidget(self.status)
+        self.delete = QPushButton("Delete")
+        self.delete.setIcon(trash_icon(self))
+        self.delete.setToolTip("Delete the sliced version")
+        self.delete.clicked.connect(self._delete)
+        left.addWidget(self.delete)
         wrap = QWidget()
         wrap.setLayout(left)
-        from PySide6.QtWidgets import QScrollArea
+        wrap.setFixedWidth(300)
+        lay.addWidget(wrap)
+        self.right = QStackedWidget()
+        self.stage = ImageStage(empty="No sliced version")
+        self.editor = ImageEditor()
+        self.editor.saved.connect(self._pieces_saved)
+        self.right.addWidget(self.stage)
+        self.right.addWidget(self.editor)
+        lay.addWidget(self.right, 1)
 
-        scroll = QScrollArea()  # scrolls on short screens instead of making the window taller than them
-        scroll.setWidget(wrap)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setFixedWidth(348)
-        lay.addWidget(scroll)
-        right = QVBoxLayout()
-        self.stage = ImageStage(empty="No sliced version yet.\nPick a layout and press Make sliced version.")
-        right.addWidget(self.stage, 1)
-        self.status = _muted("")
-        right.addWidget(self.status)
-        lay.addLayout(right, 1)
+    def _layout_changed(self) -> None:
+        key = self.layout_box.currentData()
+        for cb in self.extras.values():
+            cb.setEnabled(key not in ("auto", "front"))
 
-    def _picked(self, i: int) -> None:
-        self.about.setText(self.templates[i].about)
+    def _layout_args(self) -> tuple[str, str, list[str] | None]:
+        key = self.layout_box.currentData()
+        if key == "front":
+            return "front", "standard", None
+        if key == "auto":
+            return "side_simple", "auto", None
+        return "side_simple", key, [k for k, cb in self.extras.items() if cb.isChecked()]
 
     def refresh(self) -> None:
-        from ggs.rig.slices import sliced_character, sliced_dir, sliced_info
+        from ggs.rig.layout import Layout
+        from ggs.rig.slices import pieces_preview, sliced_character, sliced_dir, sliced_info
 
         info = sliced_info(self.ws.dir)
         ok = sliced_character(self.ws.dir) is not None
-        tid = info.get("template")
-        for i, t in enumerate(self.templates):
-            if t.id == tid:
-                self.group.button(i).setChecked(True)
-                self.about.setText(t.about)
-        from ggs.rig.slices import pieces_preview
-
-        self.stage.set_image(pieces_preview(self.ws.dir) if ok else None)
-        stale = ok and info.get("design") != self.ws.rec.accepted
-        self.status.setText("" if not ok else ("Made from an earlier design: make it again to match the new one."
-                                               if stale else "The pieces of your character. Animate them in the "
-                                               "Animate tab, or export them below."))
-        if ok and info.get("rough"):
-            self.status.setText("A rough cut: the pieces do not rebuild the drawing exactly, so some may show gaps "
-                                "when they move. For a character like this, Animate > Bend the drawing usually looks "
-                                "better (it keeps the drawing in one piece). Or make it again for other tries.")
-            self.status.setStyleSheet("color: #f0a040;")
-        else:
-            self.status.setStyleSheet("")
-        if info and not ok:
-            self.status.setText("The last try could not be cut into clean pieces. Press Make sliced version to "
-                                "try again, or change the design (simpler clothes cut better).")
-        self.make.setText("Make it again" if ok else "Make sliced version")
+        lay = info.get("layout")
+        if lay:
+            layout = Layout(**lay)
+            for k, cb in self.extras.items():
+                cb.setChecked(k in layout.extras)
+        has_tries = bool(list((sliced_dir(self.ws.dir) / "work").glob("seed_*/master.json")))
+        self.apply.setEnabled(has_tries and self.layout_box.currentData() != "front")
         self.export.setEnabled(ok)
         self.delete.setVisible(sliced_dir(self.ws.dir).exists())
-        self.touch.setVisible(ok)
+        self._layout_changed()
+        if ok:
+            self.editor.load(pieces_preview(self.ws.dir))
+            self.right.setCurrentWidget(self.editor)
+        else:
+            self.stage.set_image(None)
+            self.right.setCurrentWidget(self.stage)
+        parts = []
+        if lay:
+            parts.append(Layout(**lay).label())
+        if ok and info.get("rough"):
+            parts.append("Rough cut")
+        elif info and not ok:
+            parts.append("No clean cut")
+        if ok and info.get("design") != self.ws.rec.accepted:
+            parts.append("Older design")
+        self.status.setText("  |  ".join(parts))
 
-    def _touch_up(self) -> None:
-        from ggs.rig.slices import sliced_dir, sync_head_variants
-        from ggs.ui.paint import PaintDialog
+    def _pieces_saved(self) -> None:
+        from ggs.rig.slices import save_pieces
 
-        sheet = sliced_dir(self.ws.dir) / "parts.png"
-        dlg = PaintDialog(sheet, self, "Touch up the pieces")
-        if dlg.exec() and dlg.saved:
-            sync_head_variants(self.ws.dir)
-            self.refresh()
-            self.ws.changed.emit()
+        save_pieces(self.ws.dir, self.editor.path)
+        self.ws.changed.emit()
 
     def _delete(self) -> None:
         from ggs.items import ItemError, delete_sliced
         from ggs.ui.errors import busy_refusal, confirm_delete, show_error
 
-        if busy_refusal(self, self.queue) or not confirm_delete(
-                self, "the sliced version", "Cut-out animation needs it; you can make it again any time."):
+        if busy_refusal(self, self.queue) or not confirm_delete(self, "the sliced version"):
             return
         try:
             delete_sliced(self.project, f"character/{self.ws.rec.name}")
@@ -461,13 +495,21 @@ class SlicedTab(QWidget):
         self.refresh()
         self.ws.changed.emit()
 
-    def _make(self) -> None:
-        t = self.templates[self.group.checkedId()]
-        job = Job(f"slice {self.ws.rec.name}",
-                  [C.character_slice(self.project, f"character/{self.ws.rec.name}", t.id)], exit_ok=(0, 2))
+    def _run(self, recut: bool) -> None:
+        template, layout, extras = self._layout_args()
+        cmd = C.character_slice(self.project, f"character/{self.ws.rec.name}", template, layout, extras, recut)
+        job = Job(f"slice {self.ws.rec.name}", [cmd], exit_ok=(0, 2))
         job.done = lambda ok: self._made(ok, job)
         self.make.setEnabled(False)
+        self.apply.setEnabled(False)
+        self.right.setCurrentWidget(self.stage)
         run_on_stage(self.queue, job, self.stage)
+
+    def _make(self) -> None:
+        self._run(False)
+
+    def _apply(self) -> None:
+        self._run(True)
 
     def _made(self, ok: bool, job: Job) -> None:
         self.make.setEnabled(True)
@@ -477,9 +519,8 @@ class SlicedTab(QWidget):
         if ok and job.exit_code == 2 and sliced_character(self.ws.dir) is None:
             from ggs.ui.errors import show_error
 
-            show_error(self, "\n".join(job.output[-40:]), "Not sliced yet",
-                       "The drawing could not be cut into clean pieces this time. Press Make it again (it tries "
-                       "other seeds), or simplify the design: long coats, capes and big props are hard to cut.")
+            show_error(self, "\n".join(job.output[-40:]), "No Clean Cut",
+                       "None of the drawings could be cut into clean pieces. Generate again, or try another layout.")
         self.ws.changed.emit()
 
     def _export(self) -> None:
@@ -493,12 +534,14 @@ class SlicedTab(QWidget):
         job = Job(f"export sliced {self.ws.rec.name}", [C.export_many([], ch, fmt, out, height=self.height.value())])
 
         def done(ok: bool) -> None:
+            self.refresh()
             if ok:
                 from ggs.ui.errors import show_saved
 
                 show_saved(self, "Exported", out)
 
         job.done = done
+        self.right.setCurrentWidget(self.stage)
         run_on_stage(self.queue, job, self.stage)
 
 
@@ -511,7 +554,6 @@ class AnimateTab(QWidget):
         self.ws = ws
         self.queue, self.project = ws.queue, ws.project
         lay = QVBoxLayout(self)
-        lay.addWidget(_h("How should it move?"))
         row = QHBoxLayout()
         self.methods = QButtonGroup(self)
         for i, (title, text) in enumerate(METHODS):
@@ -525,8 +567,6 @@ class AnimateTab(QWidget):
         self.methods.button(0).setChecked(True)
         self.methods.idClicked.connect(self._method)
         lay.addLayout(row)
-        self.about = _muted(METHODS[0][1])
-        lay.addWidget(self.about)
         self.stack = QStackedWidget()
         self.warp = CutoutPanel(self, warp=True)
         self.cutout = CutoutPanel(self)
@@ -537,7 +577,6 @@ class AnimateTab(QWidget):
         lay.addWidget(self.stack, 1)
 
     def _method(self, i: int) -> None:
-        self.about.setText(METHODS[i][1])
         self.stack.setCurrentIndex(i)
         self.refresh()
 
@@ -565,11 +604,10 @@ class CutoutPanel(QWidget):
         nl.addWidget(self.need_text)
         nrow = QHBoxLayout()
         self.detail = QComboBox()
-        for label, d in (("Mesh: normal", "normal"), ("Mesh: fine (smoother bends)", "fine"),
-                         ("Mesh: coarse (faster)", "coarse")):
+        for label, d in (("Mesh: Normal", "normal"), ("Mesh: Fine", "fine"), ("Mesh: Coarse", "coarse")):
             self.detail.addItem(label, d)
         self.detail.setVisible(warp)
-        self.go = QPushButton("Get it ready to bend" if warp else "Make the sliced version")
+        self.go = QPushButton("Create Rig" if warp else "Sliced Version")
         self.go.setObjectName("primary")
         self.go.clicked.connect(self._make_warp if warp else (lambda: self.ws.show_tab(1)))
         nrow.addWidget(self.detail)
@@ -584,17 +622,16 @@ class CutoutPanel(QWidget):
         lay = QHBoxLayout(self.body)
         lay.setContentsMargins(0, 0, 0, 0)
         left = QVBoxLayout()
-        left.addWidget(_muted("Click an animation to see it; tick the ones to export."))
         self.list = MotionList(self.project, multi=True)
         self.list.current_changed.connect(self._show)
         self.list.removed.connect(self.ws.changed.emit)
         left.addWidget(self.list, 1)
         if warp:
-            remake = QPushButton("Rebuild the bend rig")
+            remake = QPushButton("Rebuild Rig")
             remake.setToolTip("Find the joints again and lay a new mesh (after a new design, or another mesh size)")
             remake.clicked.connect(self._make_warp)
             left.addWidget(self.detail_again(remake))
-            touch = QPushButton("Touch up the picture")
+            touch = QPushButton("Edit Picture...")
             touch.setToolTip("Paint over the drawing that is bent (brush, eraser, colour picker, fill)")
             touch.clicked.connect(self._touch_up)
             left.addWidget(touch)
@@ -617,7 +654,7 @@ class CutoutPanel(QWidget):
         row.addWidget(self.fmt, 1)
         row.addWidget(self.height)
         right.addLayout(row)
-        self.export = QPushButton("Export ticked animations")
+        self.export = QPushButton("Export Selected...")
         self.export.setObjectName("primary")
         self.export.clicked.connect(self._export)
         right.addWidget(self.export)
@@ -657,17 +694,12 @@ class CutoutPanel(QWidget):
         cs = self.ws.rec.settings.character
         view = cs.view if cs else "side"
         if ch is None and self.warp:
-            self.need_text.setText("Bending moves your design itself: its skeleton is fitted to the drawing and a "
-                                   "mesh is laid over it (a few seconds). Nothing is drawn again or cut apart."
-                                   + ("" if view == "side" else " The animations are side view: draw a side-view "
-                                      "design first."))
+            self.need_text.setText("No warp rig." if view == "side" else "Warp needs a side-view design.")
             self.go.setEnabled(view == "side")
         elif ch is None:
-            self.need_text.setText("Cut-out animation moves the sliced pieces of your character. Make the sliced "
-                                   "version first (it takes a few minutes).")
+            self.need_text.setText("No sliced version.")
         elif not side:
-            self.need_text.setText("This sliced version is front view; the animations are side view. Make a side "
-                                   "view sliced version to animate it.")
+            self.need_text.setText("The sliced version is front view; animations need a side view.")
         else:
             key = (str(ch), ch.stat().st_mtime)
             if key != self._rig_key:
@@ -691,7 +723,7 @@ class CutoutPanel(QWidget):
         skin = warp_skin(self.ws.dir)
         if skin is None:
             return
-        dlg = PaintDialog(skin.parent / "skin.png", self, "Touch up the picture")
+        dlg = PaintDialog(skin.parent / "skin.png", self, "Edit Picture")
         if dlg.exec() and dlg.saved:
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             try:
@@ -776,8 +808,13 @@ class CutoutPanel(QWidget):
             else:
                 ext = {"gif": ".gif", "webp": ".webp", "apng": ".png", "sheet": "_sheet.png"}[fmt]
                 out = base / f"{clips[0].stem}{ext}"
-            job = Job(f"export {self.ws.rec.name}", [C.export_many(
-                clips, ch, fmt, out, height=self.height.value(), matte="#FFFFFF" if fmt == "gif" else None)])
+            cmd = C.export_many(clips, ch, fmt, out, height=self.height.value(),
+                                matte="#FFFFFF" if fmt == "gif" else None)
+            if self.warp and self.editor.lead.isChecked():
+                from ggs.ui.anim_editor import LEAD_IN
+
+                cmd = C.export_lead_in(cmd, LEAD_IN)
+            job = Job(f"export {self.ws.rec.name}", [cmd])
 
             def done(ok: bool) -> None:
                 self.stage.setVisible(False)
@@ -806,13 +843,11 @@ class DrawnPanel(QWidget):
         self.queue, self.project = tab.queue, tab.project
         lay = QHBoxLayout(self)
         left = QVBoxLayout()
-        left.addWidget(_muted("1. Pick an animation"))
         self.list = MotionList(self.project)
         self.list.current_changed.connect(lambda _r: self._poses())
         self.list.removed.connect(self.ws.changed.emit)
         left.addWidget(self.list, 1)
-        done_lab = _muted("Drawn before")
-        left.addWidget(done_lab)
+        left.addWidget(_muted("Generated"))
         self.done_list = QListWidget()
         self.done_list.setMaximumHeight(110)
         self.done_list.currentItemChanged.connect(self._show_done)
@@ -820,15 +855,16 @@ class DrawnPanel(QWidget):
         lay.addLayout(left, 2)
         right = QVBoxLayout()
         top = QHBoxLayout()
-        top.addWidget(_muted("2. These poses are given to the model. Frames:"))
+        top.addWidget(QLabel("Frames"))
         self.frames = QSpinBox()
         self.frames.setRange(2, 16)
-        self.frames.setValue(8)
+        self.frames.setValue(12)
+        self.frames.setToolTip("Frames per animation; the preview plays the skeleton at this count")
         self.frames.valueChanged.connect(lambda _v: self._later.start())
         top.addWidget(self.frames)
         top.addStretch(1)
         right.addLayout(top)
-        self.poses = Movie("Pick an animation to see its poses")
+        self.poses = FramePlayer("Select an animation")
         right.addWidget(self.poses, 1)
         self.stage = ImageStage()
         self.stage.setVisible(False)
@@ -837,10 +873,10 @@ class DrawnPanel(QWidget):
         self.result.setVisible(False)
         right.addWidget(self.result, 1)
         row = QHBoxLayout()
-        self.draw = QPushButton("3. Draw the frames")
+        self.draw = QPushButton("Generate Frames")
         self.draw.setObjectName("primary")
         self.draw.clicked.connect(self._draw)
-        self.open = QPushButton("Open folder")
+        self.open = QPushButton("Open Folder")
         self.open.clicked.connect(self._open)
         self.open.setEnabled(False)
         from ggs.ui.errors import trash_icon
@@ -884,19 +920,19 @@ class DrawnPanel(QWidget):
         self.poses.setVisible(True)
         if not row:
             return
-        from ggs.paths import shared_dir
-        from ggs.rig.sprites import pose_preview
 
-        cs = self.ws.rec.settings.character
         try:
-            img = pose_preview(clip_for_row(row), self.frames.value(), body=cs.body if cs else None,
-                               body_preset=cs.body_preset if cs else "standard")
-            out = shared_dir() / "cache" / "previews" / "poses.png"
-            out.parent.mkdir(parents=True, exist_ok=True)
-            img.save(out)
-            self.poses.picture(out)
+            from ggs.rig.clip import load_clip
+            from ggs.rig.poses import rig_for
+            from ggs.rig.sprites import _design_lengths, frame_indices, openpose_frames
+
+            clip = load_clip(clip_for_row(row))
+            n = self.frames.value()
+            frames = openpose_frames(rig_for("side"), clip, frame_indices(clip, n), _design_lengths(self.ws.dir),
+                                     size=(288, 384))
+            self.poses.set_frames(frames, n / clip.duration)  # the skeleton the model follows, at this count
         except Exception as exc:  # noqa: BLE001
-            self.poses.play(None, f"Cannot show this one: {exc}")
+            self.poses.set_frames([], 1.0, f"Cannot show this one: {exc}")
 
     def _draw(self) -> None:
         row = self.list.current()

@@ -329,7 +329,7 @@ def between_legs(alpha, joints: dict, widths: dict) -> float | None:
         u = d / np.linalg.norm(d)
         for k in np.linspace(0.0, 1.0, max(int(gap), 2)):
             p = a + u * (0.9 * wn + k * gap)
-            x, y = int(round(p[0])), int(round(p[1]))
+            x, y = round(p[0]), round(p[1])
             if 0 <= y < alpha.shape[0] and 0 <= x < alpha.shape[1]:
                 total += 1
                 covered += int(alpha[y, x] >= 128)
@@ -437,3 +437,38 @@ def apply_layout(labels, base: RigSpec, layout: Layout, joints: dict, widths: di
     for extra in lay.extras:
         out[masks[extra] & (out >= 0)] = names.index(extra)
     return rig, j, w, out, lay
+
+
+# ---------------------------------------------------------------- playing a clip on a character
+
+
+def far_stays_back(clip):
+    """The far arm and leg always drawn behind the body and the near limbs (no near/far swaps)."""
+    if not clip.swaps or not any(any(v) for v in clip.swaps.values()):
+        return clip
+    return clip.model_copy(update={"swaps": {g: [False] * clip.frame_count for g in clip.swaps}})
+
+
+def with_lead_in(clip, rest: dict[str, float], seconds: float = 0.4):
+    """``clip`` with frames in front that move from ``rest`` (the drawing's own pose, world angles) into the clip's
+    first frame, so playback starts from the picture instead of jumping (eased, shortest way round)."""
+    n = max(2, round(seconds * clip.fps))
+
+    def ease(t: float) -> float:
+        return t * t * (3 - 2 * t)
+
+    angles, local = {}, {}
+    parents = None
+    for b, track in clip.angles.items():
+        a0 = rest.get(b, track[0])
+        d = ((track[0] - a0 + 180.0) % 360.0) - 180.0
+        start = track[0] - d
+        angles[b] = [start + d * ease(k / n) for k in range(n)] + list(track)
+    for b, track in clip.local_angles.items():
+        local[b] = [track[0]] * n + list(track)
+    del parents
+    xs, ys = list(clip.root.x), list(clip.root.y)
+    root = clip.root.model_copy(update={"x": [xs[0]] * n + xs, "y": [ys[0] * ease(k / n) for k in range(n)] + ys})
+    swaps = {g: [v[0]] * n + list(v) for g, v in clip.swaps.items()}
+    return clip.model_copy(update={"frame_count": clip.frame_count + n, "angles": angles, "local_angles": local,
+                                   "root": root, "swaps": swaps, "loop": False})

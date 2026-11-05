@@ -198,7 +198,7 @@ class BodyPoseEditor(QFrame):
         self.figure.angle_changed.connect(self._dragged)
         self.figure.released.connect(self._emit)
         lay.addWidget(self.figure, 0, Qt.AlignmentFlag.AlignHCenter)
-        hint = QLabel("Drag a hand, foot, elbow or knee to bend it.")
+        hint = QLabel("")
         hint.setObjectName("muted")
         lay.addWidget(hint)
 

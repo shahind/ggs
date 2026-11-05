@@ -134,13 +134,21 @@ def fit_masters(masters: list[Path], rig, model: str, stages) -> bool:
 
     if model == "stub" or rig.view != "side" or not masters:
         return False
+    images = [Image.fromarray(load_master(m)[1], "RGBA") for m in masters]
     try:
-        kps = detect_keypoints([Image.fromarray(load_master(m)[1], "RGBA") for m in masters], stages=stages)
+        kps = detect_keypoints(images, stages=stages)
     except (MissingModelError, OSError) as exc:
         print(f"joint finder not used ({exc}); cutting along the guide")
         return False
-    for m, kp in zip(masters, kps):
-        fit_master(m, kp, rig)
+    try:
+        from ggs.rig.parsing import parse_bodies
+
+        parses = parse_bodies(images, stages=stages)
+    except (MissingModelError, OSError) as exc:
+        print(f"body parser not used ({exc})")
+        parses = [None] * len(masters)
+    for m, kp, seg in zip(masters, kps, parses, strict=True):
+        fit_master(m, kp, rig, seg)
     return True
 
 
@@ -313,6 +321,28 @@ def suggest_from_try(master_json: Path, base, body_preset: str):
     return suggest(labels, base, joints, data["fit"]["widths"], data["height_px"], body_preset)
 
 
+def relabel_v1(master_json: Path, base) -> None:
+    """Recompute a fitted try's plain-rig labels (``labels_v1.png``) from its stored joints and parsing."""
+    import numpy as np
+    from PIL import Image
+
+    from ggs.rig.parsing import load_parse
+    from ggs.rig.skin import drawing_labels
+
+    path = Path(master_json)
+    v1 = path.parent / "master_v1.json"
+    if not v1.exists():
+        return
+    data = json.loads(v1.read_text(encoding="utf-8"))
+    widths = (data.get("fit") or {}).get("widths")
+    if not widths:
+        return
+    rgba = np.asarray(Image.open(path.parent / data.get("image", "master.png")).convert("RGBA"))
+    joints = {b: (tuple(s), tuple(e)) for b, (s, e) in data["joints"].items()}
+    labels = drawing_labels(rgba, base, joints, widths, float(data["height_px"]), load_parse(path.parent / "parse.png"))
+    Image.fromarray((labels + 1).astype(np.uint8), "L").save(path.parent / "labels_v1.png")
+
+
 def recut_slices(project: Path, ref: str, layout) -> SliceResult:
     """Cut the tries already drawn again with another layout (no drawing: a few seconds per try)."""
     from ggs.items import CharacterSettings, ItemError, load
@@ -331,9 +361,16 @@ def recut_slices(project: Path, ref: str, layout) -> SliceResult:
     drawing = json.loads((design_dir(d) / "design.json").read_text(encoding="utf-8"))["drawing"]
     cs = CharacterSettings(**(drawing.get("character") or {}))
     stages = Stages(enforce=False)
-    unfitted = [m for m in tries if not (json.loads(m.read_text(encoding="utf-8")).get("fit")
-                                         or (m.parent / "master_v1.json").exists())]
+    unfitted = [m for m in tries if not (m.parent / "parse.png").exists()
+                or not (json.loads(m.read_text(encoding="utf-8")).get("fit") or (m.parent / "master_v1.json").exists())]
+    for m in unfitted:  # fit again from the plain-skeleton version of the try (not the layout's)
+        v1 = m.parent / "master_v1.json"
+        if v1.exists():
+            shutil.move(str(v1), str(m))
+            shutil.move(str(m.parent / "labels_v1.png"), str(m.parent / "guide_labels.png"))
     fitted = fit_masters(unfitted, rig, drawing.get("model") or "flux2-klein-4b", stages) if unfitted else True
+    for m in tries:  # labels from the stored joints and body parsing, with the current rules
+        relabel_v1(m, rig)
     if layout == "auto" and fitted:
         lay, measures = suggest_from_try(tries[0], rig, cs.body_preset)
     else:
@@ -407,7 +444,8 @@ def pieces_preview(item_dir: Path) -> Path | None:
     out = d / "pieces.png"
     if not sheet.exists() or not info.exists():
         return None
-    if out.exists() and out.stat().st_mtime >= sheet.stat().st_mtime:
+    made = max(sheet.stat().st_mtime, (d / "slices.json").stat().st_mtime if (d / "slices.json").exists() else 0)
+    if out.exists() and out.stat().st_mtime > made:  # the sheet is copied with its old time: compare with the run
         return out
 
     from ggs.rig.character import load_character
@@ -450,3 +488,27 @@ def sync_head_variants(item_dir: Path) -> None:
     for v in ps.head_variants:
         img.paste(cell, (v.cell[0] * c, v.cell[1] * c))
     img.save(sheet)
+
+
+def save_pieces(item_dir: Path, pieces_png: Path | None = None) -> None:
+    """Write an edited pieces grid (``sliced/pieces.png``) back into the part sheet, cell by cell, and copy the
+    head into the expression slots."""
+    from PIL import Image
+
+    from ggs.rig.character import load_character
+
+    d = sliced_dir(item_dir)
+    sheet_path, grid_path = d / "parts.png", Path(pieces_png or d / "pieces.png")
+    rig = load_character(d / "character.yaml").rig()
+    ps = rig.part_sheet
+    sheet = Image.open(sheet_path).convert("RGBA")
+    grid = Image.open(grid_path).convert("RGBA")
+    c = sheet.width // ps.cols
+    cols = 3
+    for k, p in enumerate(ps.parts):
+        cell = grid.crop(((k % cols) * c, (k // cols) * c, (k % cols + 1) * c, (k // cols + 1) * c))
+        box = (p.cell[0] * c, p.cell[1] * c)
+        sheet.paste(Image.new("RGBA", (c, c), (0, 0, 0, 0)), box)
+        sheet.paste(cell, box)
+    sheet.save(sheet_path)
+    sync_head_variants(item_dir)

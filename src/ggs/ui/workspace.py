@@ -66,10 +66,6 @@ class Advanced(QFrame):
         for m in models:
             self.model.addItem(m, m)
         f.addRow("Model", self.model)
-        note = QLabel("Seeds make a drawing repeatable: the same seed and words give the same picture.")
-        note.setWordWrap(True)
-        note.setObjectName("muted")
-        f.addRow(note)
 
     def seed_value(self) -> int | None:
         return self.seed.value() if self.fix_seed.isChecked() else None
@@ -105,13 +101,13 @@ class DrawPanel(QWidget):
         self.stage = ImageStage(empty="Nothing drawn yet.\nDescribe it below and press Draw.")
         lay.addWidget(self.stage, 1)
         row = QHBoxLayout()
-        self.prev = _flat("◀ Previous", "Show the drawing before this one")
+        self.prev = _flat("Previous", "Previous drawing")
         self.prev.clicked.connect(lambda: ws.step(-1))
         self.where = QLabel("")
         self.where.setObjectName("muted")
-        self.next = _flat("Next ▶", "Show the next drawing")
+        self.next = _flat("Next", "Next drawing")
         self.next.clicked.connect(lambda: ws.step(1))
-        self.regen = _flat("Regenerate", "Draw the same description again with a new seed", "regenerate")
+        self.regen = _flat("Regenerate", "Same description, new seed", "regenerate")
         self.regen.clicked.connect(lambda: ws.run("regenerate"))
         from ggs.ui.errors import trash_icon
 
@@ -138,12 +134,12 @@ class DrawPanel(QWidget):
         self.input.submitted.connect(self._enter)
         box.addWidget(self.input, 1)
         col = QVBoxLayout()
-        self.change = QPushButton("Change it")
+        self.change = QPushButton("Refine")
         self.change.setIcon(icon("send"))
         self.change.setObjectName("primary")
         self.change.setToolTip("Edit the drawing on screen: type what to change, e.g. 'make the hat blue'")
         self.change.clicked.connect(self._change)
-        self.new = QPushButton("Draw new")
+        self.new = QPushButton("Generate")
         self.new.setToolTip("Start over: a new drawing from the words in the box")
         self.new.clicked.connect(self._new)
         col.addWidget(self.change)
@@ -266,7 +262,7 @@ class ItemWorkspace(QWidget):
             self.draw.caption.setText("")
         else:
             parts = self.rec.design_text()
-            self.draw.caption.setText("Drawn from: " + "  →  ".join(parts))
+            self.draw.caption.setText("  →  ".join(parts))
 
     def refresh_buttons(self) -> None:
         ns = [v.n for v in self.rec.shown()]
@@ -279,12 +275,11 @@ class ItemWorkspace(QWidget):
         d.where.setText(f"{i + 1} of {len(ns)}" if has else "")
         d.regen.setEnabled(bool(self.rec.description) and has and not self.working)
         d.change.setVisible(has)
-        d.new.setText("Draw new" if has else "Draw")
+        d.new.setText("Generate")
         d.new.setObjectName("" if has else "primary")
         d.new.style().unpolish(d.new)
         d.new.style().polish(d.new)
-        d.input.setPlaceholderText("Type a change (e.g. 'make the hat blue') and press Change it, or new words "
-                                   "and press Draw new" if has else "Describe it, then press Draw")
+        d.input.setPlaceholderText("Description, or a change to refine" if has else "Description")
         self.export_btn.setEnabled(has and not self.working)
         design = has and self.rec.accepted == cur
         d.delete.setEnabled(has and not self.working and not design)
@@ -405,7 +400,7 @@ class CharacterWorkspace(ItemWorkspace):
         self.editor.changed.connect(self._character_changed)
         self.left.addWidget(self.editor)
         self.tab_group = QButtonGroup(self)
-        for i, label in enumerate(("Design", "Sliced version", "Animate")):
+        for i, label in enumerate(("Design", "Sliced Version", "Animation")):
             b = QPushButton(label)
             b.setObjectName("tab")
             b.setCheckable(True)
@@ -418,14 +413,14 @@ class CharacterWorkspace(ItemWorkspace):
         self.pages.addWidget(self.sliced)
         self.pages.addWidget(self.animate)
         # "Use this design" and what opens after it
-        self.accept_btn = QPushButton("✓  Use this design")
+        self.accept_btn = QPushButton("Accept Design")
         self.accept_btn.setObjectName("notice")
         self.accept_btn.setToolTip("Keep this drawing as the character. Then you can make its sliced version, "
                                    "animate it and export it.")
         self.accept_btn.clicked.connect(self._accept)
-        self.kept = QLabel("✓  This is your character's design")
+        self.kept = QLabel("Accepted Design")
         self.kept.setStyleSheet("color: #3fb27f; font-weight: 600;")
-        self.go_sliced = QPushButton("Make sliced version")
+        self.go_sliced = QPushButton("Sliced Version")
         self.go_sliced.clicked.connect(lambda: self.show_tab(1))
         self.go_anim = QPushButton("Animate")
         self.go_anim.setIcon(icon("animations"))
@@ -445,7 +440,7 @@ class CharacterWorkspace(ItemWorkspace):
         on_design = accepted and self.rec.current == self.rec.accepted
         self.accept_btn.setVisible(has and not on_design)
         self.accept_btn.setEnabled(not self.working)
-        self.accept_btn.setText("✓  Use this design instead" if accepted else "✓  Use this design")
+        self.accept_btn.setText("Accept Design")
         self.kept.setVisible(on_design)
         self.go_sliced.setVisible(accepted)
         self.go_anim.setVisible(accepted)

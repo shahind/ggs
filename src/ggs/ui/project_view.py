@@ -89,7 +89,7 @@ class ProjectView(QWidget):
         left.setObjectName("panel")
         left.setMinimumWidth(190)
         lv = QVBoxLayout(left)
-        new = QPushButton("New")
+        new = QPushButton("New...")
         new.setIcon(icon("new"))
         new.setIconSize(QSize(22, 22))
         new.setObjectName("primary")

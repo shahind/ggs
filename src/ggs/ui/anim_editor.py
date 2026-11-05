@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 PREVIEW_HEIGHT = 360  # px per standing height in the editor
+LEAD_IN = 0.4  # seconds from the drawing's pose into an animation (warp)
 HANDLE = 7
 
 
@@ -248,6 +249,8 @@ class AnimEditor(QWidget):
         self.clip_name = ""
         self.save_dir: Path | None = None
         self.frame_i = 0
+        self.lead_n = 0
+        self.base_clip = None
         self.size = (1, 1)
         self.offset = (0.0, 0.0)
         self.cache: dict[int, QImage] = {}
@@ -264,13 +267,25 @@ class AnimEditor(QWidget):
             top.addWidget(b)
         self.modes.idClicked.connect(lambda _i: self._show())
         top.addStretch(1)
+        self.confirm = QPushButton("Confirm Joints")
+        self.confirm.setObjectName("primary")
+        self.confirm.setToolTip("Use these joint positions and continue to the animations")
+        self.confirm.clicked.connect(self._confirm)
+        top.addWidget(self.confirm)
+        self.lead = QPushButton("Lead-in")
+        self.lead.setCheckable(True)
+        self.lead.setChecked(True)
+        self.lead.setToolTip("Start from the drawing's pose and blend into the animation")
+        self.lead.toggled.connect(lambda _on: self.clip is not None and self.set_clip(self.base_clip, self.clip_name,
+                                                                                      self.save_dir))
+        top.addWidget(self.lead)
         self.bones_btn = QPushButton("Skeleton")
         self.bones_btn.setCheckable(True)
         self.bones_btn.setChecked(True)
         self.bones_btn.toggled.connect(self._toggle_bones)
         top.addWidget(self.bones_btn)
-        self.undo = QPushButton("Undo touch-ups")
-        self.undo.setToolTip("Go back to the animation as it is in the library")
+        self.undo = QPushButton("Reset Edits")
+        self.undo.setToolTip("Discard the touch-ups of this animation")
         self.undo.clicked.connect(self._undo)
         top.addWidget(self.undo)
         lay.addLayout(top)
@@ -289,14 +304,6 @@ class AnimEditor(QWidget):
         row.addWidget(self.slider, 1)
         row.addWidget(self.where)
         lay.addLayout(row)
-        self.strip_box = QWidget()
-        self.strip = QHBoxLayout(self.strip_box)
-        self.strip.setContentsMargins(0, 0, 0, 0)
-        lay.addWidget(self.strip_box)
-        self.hint = QLabel("")
-        self.hint.setObjectName("muted")
-        self.hint.setWordWrap(True)
-        lay.addWidget(self.hint)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self._show()
@@ -305,17 +312,29 @@ class AnimEditor(QWidget):
 
     def set_renderer(self, renderer) -> None:
         self.renderer = renderer
-        self.modes.button(1).setVisible(bool(renderer and renderer.joints_editable))
-        if renderer is None or not renderer.joints_editable:
+        editable = bool(renderer and renderer.joints_editable)
+        self.modes.button(1).setVisible(editable)
+        self.lead.setVisible(editable)
+        if not editable:
             self.modes.button(0).setChecked(True)
+        elif not getattr(renderer.skin, "confirmed", False):  # joints first: check them before animating
+            self.modes.button(1).setChecked(True)
         if self.clip is not None:
             self.set_clip(self.clip, self.clip_name, self.save_dir)
         else:
             self._show()
 
     def set_clip(self, clip, name: str, save_dir: Path | None) -> None:
+        self.base_clip = clip
+        self.lead_n = 0
         if self.renderer is not None and clip is not None:
             clip = self.renderer.prepare(clip)  # tracks for the layout's extra bones
+            if self.renderer.joints_editable and self.lead.isChecked():
+                from ggs.rig.layout import with_lead_in
+
+                n0 = clip.frame_count
+                clip = with_lead_in(clip, self.renderer.skin.rest_angles(), LEAD_IN)
+                self.lead_n = clip.frame_count - n0
         self.clip, self.clip_name, self.save_dir = clip, name, save_dir
         self.cache.clear()
         if self.renderer is not None and clip is not None:
@@ -326,25 +345,7 @@ class AnimEditor(QWidget):
             self.slider.blockSignals(False)
             self.frame_i = 0
             self.timer.setInterval(max(15, round(1000 / clip.fps)))
-            self._fill_strip()
         self._show()
-
-    def _fill_strip(self) -> None:
-        while self.strip.count():
-            it = self.strip.takeAt(0)
-            if it.widget():
-                it.widget().deleteLater()
-        if self.clip is None:
-            return
-        n = self.clip.frame_count
-        picks = sorted({round(i * (n - 1) / 7) for i in range(8)}) if n > 1 else [0]
-        for f in picks:
-            b = QPushButton(str(f + 1))
-            b.setToolTip(f"Frame {f + 1}")
-            b.setFixedHeight(26)
-            b.clicked.connect(lambda _=False, f=f: self.slider.setValue(f))
-            self.strip.addWidget(b)
-        self.strip.addStretch(1)
 
     # ------------------------------------------------------------------ drawing
 
@@ -355,8 +356,9 @@ class AnimEditor(QWidget):
 
     def _show(self) -> None:
         joints_mode = self.modes.checkedId() == 1
-        for w in (self.play, self.slider, self.where, self.undo, self.strip_box):
+        for w in (self.play, self.slider, self.where, self.undo):
             w.setVisible(not joints_mode)
+        self.confirm.setVisible(joints_mode)
         if joints_mode and self.play.isChecked():
             self.play.setChecked(False)
         if self.renderer is None:
@@ -370,12 +372,9 @@ class AnimEditor(QWidget):
                 if not any(c for c, (cs, _ce) in bones.items() if (cs - e).manhattanLength() < 1.0):
                     handles[f"{b}:end"] = e
             self.canvas.set_content(img, bones, self._unique(handles))
-            self.hint.setText("Drag a joint to where it really is in the drawing (elbow, knee, hip...). The rig is "
-                              "rebuilt when you let go.")
             return
         if self.clip is None:
-            self.canvas.set_content(None, text="Pick an animation on the left")
-            self.hint.setText("")
+            self.canvas.set_content(None, text="Select an animation")
             return
         f = self.frame_i
         bones = self.renderer.bones(self.clip, f, np.array(self.offset))
@@ -383,8 +382,6 @@ class AnimEditor(QWidget):
         self.canvas.set_content(self._frame(f), bones, handles)
         self.where.setText(f"{f + 1} / {self.clip.frame_count}")
         self.undo.setEnabled(self._saved_path() is not None and self._saved_path().exists())
-        self.hint.setText("Drag a hand, foot or the head to touch up this frame; the change fades into the frames "
-                          "around it. Export renders the frames.")
 
     @staticmethod
     def _unique(handles: dict) -> dict:
@@ -433,15 +430,26 @@ class AnimEditor(QWidget):
         delta = math.degrees(a1 - a0)
         delta = (delta + 180.0) % 360.0 - 180.0
         parents = {b.name: b.parent for b in self.renderer.rig.bones}
+        f = self.frame_i - self.lead_n  # edits go into the animation itself, not the lead-in
+        if f < 0:
+            return
         # screen angles grow clockwise like the clip's, so the turn is the same number of degrees
-        self.clip = turn_bone(self.clip, parents, key, self.frame_i, delta)
+        edited = turn_bone(self.renderer.prepare(self.base_clip), parents, key, f, delta)
         path = self._saved_path()
         if path is not None:
             path.parent.mkdir(parents=True, exist_ok=True)
-            self.clip.save(path)
-        self.cache.clear()
-        self._show()
+            edited.save(path)
+        keep = self.frame_i
+        self.set_clip(edited, self.clip_name, self.save_dir)
+        self.slider.setValue(keep)
         self.edited.emit(path)
+
+    def _confirm(self) -> None:
+        skin = self.renderer.skin
+        skin.confirmed = True
+        skin.save(self.renderer.path.parent)
+        self.modes.button(0).setChecked(True)
+        self._show()
 
     def _undo(self) -> None:
         path = self._saved_path()

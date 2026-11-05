@@ -83,7 +83,7 @@ class ModelSetupDialog(QDialog):
         self.setWindowTitle("AI models")
         self.setMinimumWidth(640)
         lay = QVBoxLayout(self)
-        h = QLabel("Set up the AI models")
+        h = QLabel("Model Setup")
         h.setObjectName("h1")
         lay.addWidget(h)
         hint = QLabel("GGS draws with AI models that run on your own graphics card. They are large, so they are "
@@ -103,7 +103,7 @@ class ModelSetupDialog(QDialog):
         self.note.setWordWrap(True)
         lay.addWidget(self.note)
         btns = QHBoxLayout()
-        have = QPushButton("I already have them...")
+        have = QPushButton("Use Existing Folder...")
         have.setToolTip("Choose a folder with the model files, for example ComfyUI's 'models' folder")
         have.clicked.connect(self._add_folder)
         btns.addWidget(have)

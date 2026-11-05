@@ -1,6 +1,8 @@
 # Body layouts: what a character is made of, how it is cut, posed and animated (proposal, 2026-11-05)
 
-Status: **proposal for the owner**. Nothing here is built yet. It replaces the three "slice templates" (side
+Status: **built** (2026-11-05): layouts, capture poses, suggestion, layout-aware cutting and warp, follow-through
+motion, the Sliced Version tab's layout picker. Body parsing (SegFormer-B2 clothes, `ggs.rig.parsing`) was added
+after the owner's third review: trusted classes (face, hair, hat, shoes, arm and leg skin) decide their parts. It replaces the three "slice templates" (side
 view, side view detailed, front view). Those differ only by view and an extra repaint pass; they say nothing
 about what the character is made of, and that is what decides how it can be cut and animated.
 

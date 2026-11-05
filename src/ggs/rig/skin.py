@@ -112,6 +112,7 @@ class SkinRig:
         self._mips: dict[int, dict[float, np.ndarray]] = {}
         self._expanded: dict[int, tuple] = {}
         self.layout: dict | None = None  # the character's body layout (set by the loader)
+        self.parse: np.ndarray | None = None  # body parsing of the picture (ggs.rig.parsing), when made
         from ggs.rig.joints import cloth_share
 
         # a skirt or long coat hangs over the legs: draw both legs behind the body (and fill their tops under it)
@@ -230,16 +231,24 @@ class SkinRig:
         return {b: max(math.dist(*self.joints[b]), 1e-3) / self.height_px for b in self.bones}
 
     def prepare(self, clip):
-        """``clip`` with tracks for every bone of this rig (a layout's chest, neck, skirt, hair, cape)."""
-        if all(b in clip.angles for b in self.bones) and not (self.layout and self.layout.get("hands") ==
-                                                                  "with_forearm"):
-            return clip
+        """``clip`` with tracks for every bone of this rig (a layout's chest, neck, skirt, hair, cape), and the far
+        arm and leg kept behind the body."""
         key = id(clip)
         if key not in self._expanded:
-            from ggs.rig.layout import expand_clip
+            from ggs.rig.layout import expand_clip, far_stays_back
 
-            self._expanded[key] = (clip, expand_clip(clip, self.rig, self.layout))
+            c = far_stays_back(clip)
+            if not all(b in c.angles for b in self.bones) or (self.layout and self.layout.get("hands") ==
+                                                                 "with_forearm"):
+                c = expand_clip(c, self.rig, self.layout)
+            self._expanded[key] = (clip, c)
         return self._expanded[key][1]
+
+    def rest_angles(self) -> dict[str, float]:
+        """World angles of the drawing's own pose (where a lead-in starts)."""
+        from ggs.rig.master import bone_angle
+
+        return {b: bone_angle(*self.joints[b]) for b in self.bones}
 
     def pose(self, clip, frame: int, in_place: bool = True) -> tuple[np.ndarray, np.ndarray]:
         """(start points, angles) of every bone at ``frame``, in drawing pixels (root at the origin)."""
@@ -312,6 +321,7 @@ class SkinRig:
         return out
 
     def render_frame(self, clip, frame: int, scale: float, size: tuple[int, int], offset: Point) -> np.ndarray:
+        clip = self.prepare(clip)
         start, ang = self.pose(clip, frame)
         swapped = {g: v[frame] for g, v in clip.swaps.items()} if clip.swaps else {}
         return self.render_pose(start, ang, swapped, scale, size, offset)
@@ -356,9 +366,13 @@ class SkinRig:
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
         (image or Image.fromarray(self.source, "RGBA")).save(out / "skin.png")
+        if self.parse is not None:  # body parts found in the picture: rebuilds (moved joints) keep them
+            from ggs.rig.parsing import save_parse
+
+            save_parse(self.parse, out / "parse.png")
         data = {"format": "ggs.skin", "version": 1, "rig": self.rig.id, "image": "skin.png",
                 "height_px": self.height_px, "joints": self.joints, "widths": self.widths, "grid": self.grid,
-                "layout": self.layout}
+                "layout": self.layout, "confirmed": bool(getattr(self, "confirmed", False))}
         (out / "skin.json").write_text(json.dumps(data, indent=1), encoding="utf-8")
         return out / "skin.json"
 
@@ -470,13 +484,13 @@ def smooth_labels(labels: np.ndarray, size: int) -> np.ndarray:
 
 
 def drawing_labels(rgba: np.ndarray, rig: RigSpec, joints: Joints, widths: dict[str, float],
-                   height_px: float) -> np.ndarray:
+                   height_px: float, parse: np.ndarray | None = None) -> np.ndarray:
     """Which bone owns each pixel of a drawing: outlined colour regions go whole to a limb or the trunk, limbs are
     cut straight at the joints, cloth hanging from the waist stays with the pelvis."""
     from ggs.rig.joints import bone_labels, region_labels
 
     labels = bone_labels(rgba[..., 3], rig, joints, widths, rgb=rgba[..., :3])
-    return region_labels(labels, rgba, rig, joints)
+    return region_labels(labels, rgba, rig, joints, parse)
 
 
 def v1_joints(joints: Joints) -> Joints:
@@ -490,13 +504,17 @@ def v1_joints(joints: Joints) -> Joints:
 
 
 def build_skin(rig: RigSpec, image, joints: Joints, widths: dict[str, float], height_px: float,
-               max_height: float | None = 640.0, grid: float = GRID, layout: dict | None = None) -> SkinRig:
+               max_height: float | None = 640.0, grid: float = GRID, layout: dict | None = None,
+               parse: np.ndarray | None = None) -> SkinRig:
     """A SkinRig from a drawing (PIL RGBA). Large drawings are scaled to ``max_height`` px per standing height
     first (frames are made at game sizes; this keeps building and rendering quick)."""
     from PIL import Image
 
     k = min(1.0, max_height / height_px) if max_height else 1.0
     if k < 1.0:
+        if parse is not None:
+            parse = np.asarray(Image.fromarray(parse.astype(np.uint8), "L").resize(
+                (round(image.width * k), round(image.height * k)), Image.NEAREST)).astype(np.int8)
         image = image.resize((round(image.width * k), round(image.height * k)), Image.LANCZOS)
         joints = {b: ((s[0] * k, s[1] * k), (e[0] * k, e[1] * k)) for b, (s, e) in joints.items()}
         widths = {b: w * k for b, w in widths.items()}
@@ -508,7 +526,7 @@ def build_skin(rig: RigSpec, image, joints: Joints, widths: dict[str, float], he
         base = rig_for(rig.id, None)
         j1 = v1_joints(joints)
         w1 = {b: widths[b] for b in j1}
-        labels1 = drawing_labels(arr, base, j1, w1, height_px)
+        labels1 = drawing_labels(arr, base, j1, w1, height_px, parse)
         rig, joints2, widths2, labels, lay = apply_layout(labels1, base, Layout(**layout), j1, w1, height_px)
         saved = Layout(**layout)
         if saved.anchors:  # a saved rig: its own joints and anchors win over the recomputed ones
@@ -520,9 +538,12 @@ def build_skin(rig: RigSpec, image, joints: Joints, widths: dict[str, float], he
             joints, widths = joints2, widths2
         skin = SkinRig(rig, arr, joints, labels, widths, height_px, grid)
         skin.layout = lay.model_dump()
+        skin.parse = parse
         return skin
-    labels = drawing_labels(arr, rig, joints, widths, height_px)
-    return SkinRig(rig, arr, joints, labels, widths, height_px, grid)
+    labels = drawing_labels(arr, rig, joints, widths, height_px, parse)
+    skin = SkinRig(rig, arr, joints, labels, widths, height_px, grid)
+    skin.parse = parse
+    return skin
 
 
 def load_skin(path: str | Path, rig: RigSpec | None = None) -> SkinRig:
@@ -538,5 +559,9 @@ def load_skin(path: str | Path, rig: RigSpec | None = None) -> SkinRig:
     rig = rig or load_rig_spec(rigs_dir() / f"{data['rig']}.yaml")
     joints = {b: (tuple(s), tuple(e)) for b, (s, e) in data["joints"].items()}
     image = Image.open(path.parent / data["image"]).convert("RGBA")
-    return build_skin(rig, image, joints, data["widths"], data["height_px"], max_height=None,
-                      grid=data.get("grid", GRID), layout=data.get("layout"))
+    from ggs.rig.parsing import load_parse
+
+    skin = build_skin(rig, image, joints, data["widths"], data["height_px"], max_height=None,
+                      grid=data.get("grid", GRID), layout=data.get("layout"), parse=load_parse(path.parent / "parse.png"))
+    skin.confirmed = bool(data.get("confirmed", False))  # the user checked the joints in the editor
+    return skin

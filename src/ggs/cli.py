@@ -1303,6 +1303,10 @@ def _export_warp(args: argparse.Namespace) -> int:
             name = args.name if (args.name and not many) else Path(path).stem
             target = Path(args.out) / f"{name}{ext}" if many else Path(args.out)
             target.parent.mkdir(parents=True, exist_ok=True)
+            if getattr(args, "lead_in", 0):  # start from the drawing's pose, blend into the clip
+                from ggs.rig.layout import with_lead_in
+
+                clip = with_lead_in(skin.prepare(clip), skin.rest_angles(), args.lead_in)
             frames, anchor = skin.render_clip(clip, args.height, padding=args.padding)
             if args.format == "apng":
                 out = save_apng(frames, target, clip.fps, clip.loop)
@@ -1762,6 +1766,8 @@ def build_parser() -> argparse.ArgumentParser:
     ex.add_argument("--padding", type=int, default=2)
     ex.add_argument("--matte", default=None, help="GIF only: background colour #RRGGBB for soft edges")
     ex.add_argument("--name", default=None, help="animation name for a single clip (default: its file name)")
+    ex.add_argument("--lead-in", type=float, default=0.0,
+                    help="warp rigs: seconds blending from the drawing's pose into the first frame (0 = none)")
     ex.set_defaults(func=cmd_export)
     return p
 

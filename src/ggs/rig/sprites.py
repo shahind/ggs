@@ -308,7 +308,8 @@ def openpose_frames(rig, clip, idx: list[int], lengths: dict[str, float], size=A
     return out
 
 
-def _animatediff_frames(d: Path, info: dict, clip, n: int, seed: int, profile: str, enforce_vram: bool):
+def _animatediff_frames(d: Path, info: dict, clip, n: int, seed: int, profile: str, enforce_vram: bool,
+                        motion: str = ""):
     """(RGBA frames cropped to one box, anchor, pose strip) drawn by AnimateDiff."""
     import numpy as np
     from PIL import Image
@@ -328,7 +329,8 @@ def _animatediff_frames(d: Path, info: dict, clip, n: int, seed: int, profile: s
     ref = Image.new("RGB", design.size, "white")
     ref.paste(design, mask=design.getchannel("A"))
     who = "; ".join(info.get("text") or ["a character"])
-    prompt = (f"{who}, full body, side view, facing right, flat cartoon game character, clean outlines, plain white "
+    doing = f", {motion}" if motion else ""
+    prompt = (f"{who}{doing}, the whole body moving, full body, side view, facing right, game character, plain white "
               "background")
     spec = load_pipelines()
     stages = Stages(profile=profile, enforce=enforce_vram)
@@ -414,7 +416,7 @@ def make_frames(project: Path, ref: str, clip_path: str | Path, *, frames: int =
     if method == "animatediff" and model != "stub":
         progress.start("frames:animatediff", ["animate", "matte"])
         seed = (seeds or [drawing["seed"]])[0]
-        fr, anchor, strip = _animatediff_frames(d, info, clip, min(frames, 16), seed, profile, enforce_vram)
+        fr, anchor, strip = _animatediff_frames(d, info, clip, min(frames, 16), seed, profile, enforce_vram, motion)
         fps = len(fr) / clip.duration
         (out / "frames").mkdir()
         for k, f in enumerate(fr):

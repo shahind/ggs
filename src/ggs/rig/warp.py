@@ -91,6 +91,7 @@ def make_design_warp(project: Path, ref: str, detail: str = "normal", *, fit: bo
     cs = CharacterSettings(**(info["drawing"].get("character") or {}))
     image = Image.open(design_dir(d) / data["image"]).convert("RGBA")
     report: dict = {}
+    parse = None
     if fit:
         from ggs.pipeline.models import MissingModelError
         from ggs.rig.joints import detect_keypoints, fit_joints
@@ -100,8 +101,14 @@ def make_design_warp(project: Path, ref: str, detail: str = "normal", *, fit: bo
             joints, report = fit_joints(joints, kp, height_px)
         except (MissingModelError, OSError) as exc:
             print(f"joint finder not used ({exc}); the design's own skeleton is used")
+        try:
+            from ggs.rig.parsing import parse_bodies
+
+            parse = parse_bodies([image], stages=stages)[0]
+        except (MissingModelError, OSError):
+            parse = None
     widths = body_widths(rig, cs, joints, height_px)
-    skin = build_skin(rig, image, joints, widths, height_px, grid=DETAIL[detail])
+    skin = build_skin(rig, image, joints, widths, height_px, grid=DETAIL[detail], parse=parse if fit else None)
     out = skin.save(warp_dir(d))
     (warp_dir(d) / "warp.json").write_text(json.dumps({
         "format": "ggs.warp", "version": 1, "design": rec.accepted, "detail": detail, "fitted": report},
@@ -120,8 +127,10 @@ def _warp_from_drawing(d: Path, master_json: Path, detail: str) -> Path:
     base = rig_for(spec.rig, None)
     widths = fit.get("widths") or {}
     layout = fit.get("layout")
+    from ggs.rig.parsing import load_parse
+
     skin = build_skin(base, Image.fromarray(master, "RGBA"), spec.joints, widths, spec.height_px,
-                      grid=DETAIL[detail], layout=layout)
+                      grid=DETAIL[detail], layout=layout, parse=load_parse(Path(master_json).parent / "parse.png"))
     out = skin.save(warp_dir(d))
     (warp_dir(d) / "warp.json").write_text(json.dumps({
         "format": "ggs.warp", "version": 1, "source": "drawing", "detail": detail, "layout": layout}, indent=1),
@@ -153,7 +162,7 @@ def move_joints(skin_json: Path, moved: dict[str, Point]) -> SkinRig:
     from ggs.rig.layout import rig_for
 
     rebuilt = build_skin(rig_for(skin.rig.id, None) if skin.layout else skin.rig, _image(skin), new, skin.widths,
-                         skin.height_px, max_height=None, grid=skin.grid, layout=skin.layout)
+                         skin.height_px, max_height=None, grid=skin.grid, layout=skin.layout, parse=skin.parse)
     rebuilt.save(Path(skin_json).parent)
     return rebuilt
 

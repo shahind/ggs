@@ -22,11 +22,11 @@ packs:
         dir: FLUX.2-klein-4B-GGUF
         include: [flux-2-klein-4b-Q4_K_M.gguf]
   cutout:
-    label: Cut-out model (BiRefNet) and joint finder (ViTPose)
-    why: Gives every asset a clean transparent background, and finds a character's joints for animation.
+    label: Cut-out model (BiRefNet), joint finder (ViTPose) and body parser (SegFormer)
+    why: Gives every asset a clean transparent background, and finds a character's joints and body parts.
     required: true
-    size_gb: 0.74
-    ready_when: {matting: [birefnet], pose: [vitpose-base-simple]}
+    size_gb: 0.85
+    ready_when: {matting: [birefnet], pose: [vitpose-base-simple, segformer-b2-clothes]}
     parts:
       - repo: ZhengPeng7/BiRefNet
         dir: BiRefNet
@@ -34,6 +34,9 @@ packs:
       - repo: usyd-community/vitpose-base-simple
         dir: vitpose-base-simple
         include: ["*.json", "*.safetensors"]
+      - repo: mattmdjaga/segformer_b2_clothes
+        dir: segformer-b2-clothes
+        include: ["*.json", "model.safetensors"]
   frames:
     label: Frame animator (AnimateDiff + OpenPose, optional)
     why: Draws a character's animation frame by frame, following the skeleton and keeping the design.

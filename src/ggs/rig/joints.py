@@ -306,7 +306,7 @@ def cloth_share(labels: np.ndarray, rig: RigSpec, joints: Joints, widths: dict[s
     return hanging / max(hanging + thighs, 1.0)
 
 
-def fit_master(master_json: str | Path, kp: dict, rig: RigSpec) -> dict:
+def fit_master(master_json: str | Path, kp: dict, rig: RigSpec, parse: np.ndarray | None = None) -> dict:
     """Move a master's skeleton onto the detected joints and label its pixels from that skeleton.
 
     Rewrites master.json (joints, angles, origin) and guide_labels.png (the labels the cutter reads); the guide's
@@ -320,9 +320,21 @@ def fit_master(master_json: str | Path, kp: dict, rig: RigSpec) -> dict:
 
     path = Path(master_json)
     spec, master, glabels = load_master(path)
+    guide_copy0 = path.parent / "guide_labels_guide.png"
+    if guide_copy0.exists():  # fitted before: widths from the guide's own shapes, joints from where they were found
+        glabels = np.asarray(Image.open(guide_copy0).convert("L")).astype(np.int16) - 1
     joints, report = fit_joints(spec.joints, kp, spec.height_px)
-    widths = bone_widths(glabels, rig, spec.joints)
-    labels = drawing_labels(master, rig, joints, widths, spec.height_px)
+    widths = (spec.fit or {}).get("widths") or bone_widths(glabels, rig, spec.joints)
+    widths = {b: widths[b] for b in (x.name for x in rig.bones)}
+    if parse is None:
+        from ggs.rig.parsing import load_parse
+
+        parse = load_parse(path.parent / "parse.png")
+    else:
+        from ggs.rig.parsing import save_parse
+
+        save_parse(parse, path.parent / "parse.png")
+    labels = drawing_labels(master, rig, joints, widths, spec.height_px, parse)
     guide_copy = path.parent / "guide_labels_guide.png"
     if not guide_copy.exists():
         Image.fromarray((glabels + 1).astype(np.uint8), "L").save(guide_copy)
@@ -375,7 +387,8 @@ def split_along_chain(xs: np.ndarray, ys: np.ndarray, chain: list[str], joints: 
     return k
 
 
-def region_labels(labels: np.ndarray, rgba: np.ndarray, rig: RigSpec, joints: Joints) -> np.ndarray:
+def region_labels(labels: np.ndarray, rgba: np.ndarray, rig: RigSpec, joints: Joints,
+                  parse: np.ndarray | None = None) -> np.ndarray:
     """Clean ownership for flat game art: every outlined colour region goes to one limb (or the trunk), whole;
     inside a limb the bones are split by straight cuts at the joints. ``labels`` (nearest bone by width) only
     votes. A region shared by several limbs (no outline between them) is split by those votes first. Outline
@@ -394,28 +407,104 @@ def region_labels(labels: np.ndarray, rgba: np.ndarray, rig: RigSpec, joints: Jo
     regions, _n = colour_regions(rgba[..., :3], mask, ink)
     from scipy import ndimage
 
+    if parse is not None:  # body parsing splits colour areas further (shirt from shorts on shaded art)
+        combo = np.where(regions > 0, regions.astype(np.int64) * 32 + parse.astype(np.int64) + 1, 0)
+        _, inv = np.unique(combo, return_inverse=True)
+        regions = inv.reshape(combo.shape).astype(np.int32)
+
+    head = index.get("head")
     out = np.full(labels.shape, -1, np.int16)
     for k, sl in enumerate(ndimage.find_objects(regions), start=1):
         if sl is None:
             continue
         r = regions[sl] == k
-        votes = chain_of[labels[sl][r]]
+        bone_votes = labels[sl][r]
+        votes = chain_of[bone_votes]
         ys, xs = np.nonzero(r)
         xs, ys = xs + sl[1].start, ys + sl[0].start
         counts = np.bincount(votes[votes >= 0], minlength=len(chain_list))
         top = int(np.argmax(counts))
-        whole = counts[top] >= 0.8 * len(votes)
+        # a limb takes its outlined region whole (a boot, a glove); the trunk only when no limb shares it (a shirt
+        # whose sleeves have no outline keeps the sleeves on the arms)
+        whole = counts[top] >= (0.97 if top == 0 else 0.8) * len(votes)
         per_px = np.full(len(xs), top) if whole else np.where(votes >= 0, votes, top)
         lab = np.empty(len(xs), np.int16)
         for c in np.unique(per_px):
             sel = per_px == c
             ch = chain_list[c]
-            lab[sel] = np.array([index[b] for b in ch])[split_along_chain(xs[sel], ys[sel], ch, joints)]
+            ids = np.array([index[b] for b in ch])
+            bc = np.array([(bone_votes[sel] == i).sum() for i in ids])
+            share = bc / max(int(sel.sum()), 1)
+            headish = parse is None or bool(np.isin(parse[ys[sel], xs[sel]], (1, 2, 3, 11)).mean() >= 0.5)
+            if head is not None and head in ids and share[list(ids).index(head)] >= 0.5 and headish and sel.sum() >= 30:
+                lab[sel] = head  # face and neck skin, hair: all of it goes with the head
+            elif share.max() >= 0.8:
+                lab[sel] = ids[int(np.argmax(share))]  # one bone's region (a sleeve, a shoe): never cut through
+            else:
+                lab[sel] = ids[split_along_chain(xs[sel], ys[sel], ch, joints)]  # e.g. skin from forearm to hand
         sub = out[sl]
         sub[r] = lab
     # cloth hanging from the waist (labelled by bone_labels) stays with the pelvis
     root = next(i for i, b in enumerate(rig.bones) if b.parent is None)
     out = np.where((labels == root) & ~ink & (out >= 0) & (chain_of[np.maximum(out, 0)] != chain_of[root]),
                    root, out)
+    if parse is not None:
+        out = _trusted_parts(out, parse, mask, rig, joints, index)
+        out[(parse == 0) & mask] = -1  # edge fringe the parser calls background: owned like outlines (nearest)
+        ink = ink | ((parse == 0) & mask)
     filled = nearest_labels(np.where(mask & ~ink, out, -1).astype(np.int16), mask)
     return np.where(mask, filled, -1).astype(np.int16)
+
+
+def _trusted_parts(out: np.ndarray, parse: np.ndarray, mask: np.ndarray, rig: RigSpec, joints: Joints,
+                   index: dict[str, int]) -> np.ndarray:
+    """Body-parsing classes that are reliable on game art decide their part directly: face, hair, hat (the neck is
+    part of the face) -> head; each shoe -> the nearer foot; each patch of arm or leg skin -> the nearer arm or leg,
+    cut at the joints."""
+    from scipy import ndimage
+
+    from ggs.rig import parsing as P
+    from ggs.rig.retarget import limb_groups
+
+    out = out.copy()
+    if "head" in index:  # the main head area only: stray specks the parser calls hat or face stay where they are
+        comp, n = ndimage.label(np.isin(parse, P.HEAD_CLASSES) & mask)
+        if n:
+            sizes = np.bincount(comp.ravel())[1:]
+            keep = np.nonzero(sizes >= max(200, 0.05 * sizes.max()))[0] + 1
+            out[np.isin(comp, keep)] = index["head"]
+    groups = {g.name: g for g in limb_groups(rig)}
+
+    def nearest_chain(ys, xs, sides):
+        pts = np.stack([xs, ys], axis=1).astype(np.float32)
+        best, d0 = None, np.inf
+        for chain in sides:
+            d = min(float(np.mean(_pt_seg(pts, *joints[b]))) for b in chain)
+            if d < d0:
+                best, d0 = chain, d
+        return best
+
+    for classes, group, cut in ((P.ARM_SKIN, "upper_arm", 3), (P.LEG_SKIN, "thigh", 2), (P.SHOES, "thigh", 0)):
+        g = groups.get(group)
+        if g is None:
+            continue
+        comp, n = ndimage.label(np.isin(parse, classes) & mask)
+        for k in range(1, n + 1):
+            ys, xs = np.nonzero(comp == k)
+            if len(ys) < 15:
+                continue
+            chain = nearest_chain(ys, xs, [list(g.near), list(g.far)])
+            if classes == P.SHOES:  # a shoe is the foot, whole
+                out[ys, xs] = index[chain[-1]]
+                continue
+            bones = chain[:cut]  # skin: upper arm/forearm/hand, or thigh/shin (the foot is the shoe)
+            out[ys, xs] = np.array([index[b] for b in bones])[split_along_chain(xs, ys, bones, joints)]
+    return out
+
+
+def _pt_seg(pts: np.ndarray, p0, p1) -> np.ndarray:
+    d = np.array(p1, np.float32) - np.array(p0, np.float32)
+    n2 = float(d @ d)
+    rel = pts - np.array(p0, np.float32)
+    t = np.clip(rel @ d / n2, 0.0, 1.0) if n2 > 0 else np.zeros(len(pts), np.float32)
+    return np.linalg.norm(rel - t[:, None] * d[None, :], axis=1)

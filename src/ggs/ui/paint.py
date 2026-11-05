@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QColorDialog,
     QDialog,
     QHBoxLayout,
-    QLabel,
     QPushButton,
     QSlider,
     QVBoxLayout,
@@ -169,22 +168,27 @@ class PaintCanvas(QWidget):
         self.panning = None
 
 
-class PaintDialog(QDialog):
-    """Edit a PNG in place. ``saved`` is True after Save."""
+class ImageEditor(QWidget):
+    """A PNG open for editing: tools, canvas, Open With (installed open-source editors, reloaded when saved
+    there), Revert and Save. ``saved`` is emitted after Save."""
 
-    def __init__(self, path: Path, parent=None, title: str = "Touch up"):
+    saved = Signal()
+
+    def __init__(self, path: Path | None = None, parent=None):
         super().__init__(parent)
-        self.path = Path(path)
-        self.saved = False
-        self.setWindowTitle(title)
-        self.resize(1000, 760)
+        from PySide6.QtCore import QFileSystemWatcher
+        from PySide6.QtWidgets import QMenu, QToolButton
+
+        from ggs.ui.external import find_editors, open_with
+
+        self.path = Path(path) if path else None
         lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
         bar = QHBoxLayout()
         self.tools = QButtonGroup(self)
         for i, (key, label, tip) in enumerate((
-                ("brush", "Brush", "Paint with the colour"), ("eraser", "Eraser", "Make pixels transparent"),
-                ("fill", "Fill", "Recolour an area of one colour (click inside it)"),
-                ("picker", "Pick colour", "Click to take a colour from the picture (right-click works anytime)"))):
+                ("brush", "Brush", "Paint"), ("eraser", "Eraser", "Erase to transparent"),
+                ("fill", "Fill", "Fill an area of one colour"), ("picker", "Picker", "Pick a colour (or right-click)"))):
             b = QPushButton(label)
             b.setObjectName("tab")
             b.setCheckable(True)
@@ -194,14 +198,14 @@ class PaintDialog(QDialog):
             self.tools.addButton(b, i)
             bar.addWidget(b)
         self.swatch = QPushButton("   ")
-        self.swatch.setToolTip("Brush colour")
+        self.swatch.setToolTip("Colour")
         self.swatch.clicked.connect(self._choose)
         bar.addWidget(self.swatch)
-        bar.addWidget(QLabel("Size"))
         self.size = QSlider(Qt.Orientation.Horizontal)
         self.size.setRange(1, 60)
         self.size.setValue(6)
-        self.size.setFixedWidth(140)
+        self.size.setFixedWidth(110)
+        self.size.setToolTip("Brush size")
         bar.addWidget(self.size)
         bar.addStretch(1)
         for label, fn in (("Undo", lambda: self.canvas.do_undo()), ("Redo", lambda: self.canvas.do_redo()),
@@ -209,33 +213,59 @@ class PaintDialog(QDialog):
             b = QPushButton(label)
             b.clicked.connect(fn)
             bar.addWidget(b)
+        self.open_with = QToolButton()
+        self.open_with.setText("Open With")
+        self.open_with.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(self.open_with)
+        for name, exe in find_editors():
+            menu.addAction(name, lambda exe=exe: self.path and open_with(exe, self.path))
+        menu.addAction("Default App", lambda: self.path and open_with(None, self.path))
+        self.open_with.setMenu(menu)
+        self.open_with.setToolTip("Edit in an installed editor; changes saved there are loaded here")
+        bar.addWidget(self.open_with)
+        self.revert = QPushButton("Revert")
+        self.revert.clicked.connect(self.reload)
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setObjectName("primary")
+        self.save_btn.clicked.connect(self.save)
+        bar.addWidget(self.revert)
+        bar.addWidget(self.save_btn)
         lay.addLayout(bar)
-        self.canvas = PaintCanvas(QImage(str(self.path)))
+        self.canvas = PaintCanvas(QImage(str(self.path)) if self.path else QImage(8, 8, QImage.Format.Format_ARGB32))
         self.canvas.picked.connect(self._set_colour)
         self.tools.idClicked.connect(lambda i: setattr(self.canvas, "tool", self.tools.button(i).property("tool")))
         self.size.valueChanged.connect(lambda v: setattr(self.canvas, "size", v))
         lay.addWidget(self.canvas, 1)
-        tip = QLabel("Mouse wheel zooms, middle button moves the picture, right-click takes a colour.")
-        tip.setObjectName("muted")
-        lay.addWidget(tip)
-        row = QHBoxLayout()
-        ext = QPushButton("Open in my image editor")
-        ext.setToolTip("Edit the file in your usual image app; press Reload here when you have saved it there")
-        ext.clicked.connect(self._external)
-        reload_ = QPushButton("Reload")
-        reload_.clicked.connect(self._reload)
-        row.addWidget(ext)
-        row.addWidget(reload_)
-        row.addStretch(1)
-        cancel = QPushButton("Cancel")
-        cancel.clicked.connect(self.reject)
-        save = QPushButton("Save")
-        save.setObjectName("primary")
-        save.clicked.connect(self._save)
-        row.addWidget(cancel)
-        row.addWidget(save)
-        lay.addLayout(row)
+        self.watch = QFileSystemWatcher(self)
+        self.watch.fileChanged.connect(lambda _p: self.reload())
         self._set_colour(QColor(0, 0, 0))
+        if self.path:
+            self.watch.addPath(str(self.path))
+
+    def load(self, path: Path | None) -> None:
+        if self.path:
+            self.watch.removePath(str(self.path))
+        self.path = Path(path) if path else None
+        if self.path:
+            self.watch.addPath(str(self.path))
+        self.reload()
+
+    def reload(self) -> None:
+        img = QImage(str(self.path)) if self.path and self.path.exists() else QImage(8, 8, QImage.Format.Format_ARGB32)
+        if img.isNull():
+            return
+        self.canvas.image = img.convertToFormat(QImage.Format.Format_ARGB32)
+        self.canvas.undo.clear()
+        self.canvas.redo.clear()
+        self.canvas.fit()
+
+    def save(self) -> None:
+        if not self.path:
+            return
+        self.watch.removePath(str(self.path))
+        self.canvas.image.save(str(self.path))
+        self.watch.addPath(str(self.path))
+        self.saved.emit()
 
     def showEvent(self, e) -> None:
         super().showEvent(e)
@@ -246,22 +276,29 @@ class PaintDialog(QDialog):
         self.swatch.setStyleSheet(f"background: {self.canvas.colour.name()};")
 
     def _choose(self) -> None:
-        c = QColorDialog.getColor(self.canvas.colour, self, "Brush colour")
+        c = QColorDialog.getColor(self.canvas.colour, self, "Colour")
         if c.isValid():
             self._set_colour(c)
 
-    def _external(self) -> None:
-        from PySide6.QtCore import QUrl
-        from PySide6.QtGui import QDesktopServices
 
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.path)))
+class PaintDialog(QDialog):
+    """``ImageEditor`` in a window (the warp's picture). ``saved`` is True after Save."""
 
-    def _reload(self) -> None:
-        self.canvas._snapshot()
-        self.canvas.image = QImage(str(self.path)).convertToFormat(QImage.Format.Format_ARGB32)
-        self.canvas.update()
+    def __init__(self, path: Path, parent=None, title: str = "Edit Picture"):
+        super().__init__(parent)
+        self.path = Path(path)
+        self.saved = False
+        self.setWindowTitle(title)
+        self.resize(1000, 760)
+        lay = QVBoxLayout(self)
+        self.editor = ImageEditor(self.path, self)
+        self.editor.saved.connect(self._done)
+        self.canvas = self.editor.canvas
+        lay.addWidget(self.editor)
 
-    def _save(self) -> None:
-        self.canvas.image.save(str(self.path))
+    def _done(self) -> None:
         self.saved = True
         self.accept()
+
+    def _save(self) -> None:
+        self.editor.save()

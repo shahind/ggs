@@ -77,11 +77,13 @@ class Character:
         return rig_for(self.spec.rig, self.spec.layout)
 
     def clip(self, clip):
-        """``clip`` with tracks for every bone of the character's layout (chest, neck, skirt, hair, cape)."""
+        """``clip`` ready for this character: tracks for every bone of its layout (chest, neck, skirt, hair, cape),
+        and the far arm and leg kept behind the body."""
+        from ggs.rig.layout import expand_clip, far_stays_back
+
+        clip = far_stays_back(clip)
         if not self.spec.layout:
             return clip
-        from ggs.rig.layout import expand_clip
-
         return expand_clip(clip, self.rig(), self.spec.layout)
 
     def puppet(self, rig: RigSpec, items: list | None = None) -> Puppet:

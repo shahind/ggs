@@ -88,7 +88,7 @@ def test_project_window_tree_and_workspace(qapp, tmp_path, settings):
     ws = v.stack.currentWidget()
     assert isinstance(ws, ItemWorkspace)
     d = ws.draw
-    assert d.change.isVisibleTo(ws) and d.new.text() == "Draw new" and d.regen.isEnabled()
+    assert d.change.isVisibleTo(ws) and d.new.text() == "Generate" and d.regen.isEnabled()
     assert d.where.text() == "1 of 1" and not d.prev.isEnabled() and d.stage.pix is not None
     assert d.input.toPlainText() == "a red potion"  # the prompt stays in the box
     assert not hasattr(ws, "chat_lay") and not hasattr(d, "vars")  # no chat, no variations
@@ -154,7 +154,7 @@ def test_character_workspace_tabs_open_after_accept(qapp, tmp_path, settings):
     ws.reload()
     assert ws.kept.isVisibleTo(ws) and not ws.accept_btn.isVisibleTo(ws) and ws.tab_group.button(2).isEnabled()
     ws.show_tab(1)
-    assert len(ws.sliced.group.buttons()) >= 3 and not ws.sliced.export.isEnabled()  # nothing sliced yet
+    assert ws.sliced.layout_box.count() == 5 and not ws.sliced.export.isEnabled()  # nothing sliced yet
     ws.show_tab(2)
     assert ws.animate.warp.need.isVisibleTo(ws)  # bending and cut-out need the sliced version first
     ws.animate.methods.button(1).click()
@@ -250,8 +250,12 @@ def test_live_editor_plays_and_touches_up(qapp, tmp_path):
     ed = AnimEditor()
     ed.resize(600, 600)
     ed.set_renderer(WarpRenderer(make_design_warp(p, "Hero", "coarse", fit=False)))
+    assert ed.modes.checkedId() == 1 and ed.confirm.isVisibleTo(ed)  # joints first, until confirmed
+    ed._confirm()
+    assert ed.modes.checkedId() == 0
     ed.set_clip(load_clip(walk), "walk", tmp_path / "edits")
-    for f in (0, 3, 7):
+    assert ed.lead_n > 0 and ed.clip.frame_count == load_clip(walk).frame_count + ed.lead_n  # lead-in in front
+    for f in (0, 3, ed.lead_n + 4):
         ed.slider.setValue(f)
     assert ed.canvas.image is not None and not ed.canvas.image.isNull() and ed.canvas.handles
     key = next(k for k in ed.canvas.handles if k.startswith("hand"))

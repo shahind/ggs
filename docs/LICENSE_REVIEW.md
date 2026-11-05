@@ -26,6 +26,7 @@ Status key: **used** = the code loads it today; **candidate** = on disk or plann
 | svntax pixel 4-walk LoRA | svntax-dev/pixel_spritesheet_4walk_small_lora_v1 | unknown | **verify** | candidate | pixel walk sheets |
 | T2I-Adapter OpenPose SDXL 1.0 | TencentARC/t2i-adapter-openpose-sdxl-1.0 (in the `sdxl` pack, downloaded on demand) | Apache-2.0 (hub card, checked 2026-11-05) | yes | **used** | SDXL characters follow the chosen pose |
 | ViTPose base (simple) | https://huggingface.co/usyd-community/vitpose-base-simple | Apache-2.0 | yes | **used**, downloaded with the cut-out pack | finds a drawn character's joints (slicing, warp animation) |
+| SegFormer-B2 clothes (ATR) | https://huggingface.co/mattmdjaga/segformer_b2_clothes | MIT (model card); trained on ATR (research data) | verify the dataset terms | **used**, downloaded with the cut-out pack | body parts for slicing and warp |
 | OpenCV (headless) | PyPI `opencv-python-headless` (bundled with the app) | Apache-2.0 | yes | **used**, **bundled** | triangle warping for warp animation |
 | DreamShaper 8 (SD 1.5 fine-tune) | https://huggingface.co/Lykon/dreamshaper-8 | CreativeML OpenRAIL-M (model card) | yes, with use restrictions | **candidate** (AnimateDiff spike) | base model for pose-driven frames |
 | AnimateDiff motion adapter v1-5-3 | https://huggingface.co/guoyww/animatediff-motion-adapter-v1-5-3 | Apache-2.0 (AnimateDiff repo) | yes | **candidate** (spike) | motion between frames |

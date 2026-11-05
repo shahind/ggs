@@ -12,13 +12,14 @@ from pathlib import Path
 
 from ggs.pipeline.vram import Stages
 
-NEGATIVE = "blurry, deformed, extra limbs, extra fingers, background scenery, text, watermark, frame, border"
+NEGATIVE = ("blurry, deformed, extra limbs, extra fingers, backpack, bag, satchel, holding an object, props, weapon, "
+            "extra objects, extra accessories, background scenery, text, watermark, frame, border, static pose")
 
 
 class AnimateDiffFrames:
     supports_reference = True
 
-    def __init__(self, files: dict[str, Path], steps: int = 25, ip_scale: float = 0.7, pose_scale: float = 1.0):
+    def __init__(self, files: dict[str, Path], steps: int = 25, ip_scale: float = 0.5, pose_scale: float = 1.2):
         self.files, self.steps, self.ip_scale, self.pose_scale = files, steps, ip_scale, pose_scale
 
     def generate(self, poses: list, reference, prompt: str, seed: int, width: int, height: int,
