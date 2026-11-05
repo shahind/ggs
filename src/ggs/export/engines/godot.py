@@ -142,7 +142,7 @@ def write_godot(package_dir: str | Path) -> Path:
                 pkg.doc["rest_pose"]["root"]["x"], pkg.doc["rest_pose"]["root"]["y"])
             rot = first_local[b][0] if first else pkg.doc["rest_pose"]["angles"][b]
         else:
-            pos = (0.0, bone["attach"] * pkg.bone(parent)["length"])
+            pos = (bone.get("attach_side_px", 0.0), bone["attach"] * pkg.bone(parent)["length"])
             rot = first_local[b][0] if first else (
                 pkg.doc["rest_pose"]["angles"][b] - pkg.doc["rest_pose"]["angles"][parent])
         out += [f'[node name="{b}" type="Node2D" parent="{_parent_attr(pkg, b)}"]',

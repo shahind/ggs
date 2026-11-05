@@ -219,7 +219,7 @@ def write_defold(package_dir: str | Path, project_path: str | None = None) -> Pa
             pos = (x, -y, 0.0)
             ang = local0[b][0] if first else rest["angles"][b]
         else:
-            pos = (0.0, -bone["attach"] * pkg.bone(bone["parent"])["length"], 0.0)
+            pos = (bone.get("attach_side_px", 0.0), -bone["attach"] * pkg.bone(bone["parent"])["length"], 0.0)
             ang = local0[b][0] if first else rest["angles"][b] - rest["angles"][bone["parent"]]
         kids = [*pkg.children(b), f"{b}_art", *[f"{b}_item_{i['name']}" for i in held if i["bone"] == b]]
         if part["name"] == "head" and not far:

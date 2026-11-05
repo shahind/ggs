@@ -25,7 +25,7 @@ from ggs.ui import commands as C
 from ggs.ui.jobs import Job, JobQueue
 from ggs.ui.kinds import kind
 from ggs.ui.widgets import checker_pixmap
-from ggs.ui.workspace import ItemWorkspace, Placeholder
+from ggs.ui.workspace import CharacterWorkspace, ItemWorkspace, Placeholder
 
 MODEL_LABELS = {"flux2-klein-4b": "FLUX.2 klein - best quality", "sdxl": "SDXL - faster style training"}
 ROLE_DIR = 256
@@ -130,6 +130,15 @@ class ProjectView(QWidget):
         target = None
         for rec, d in list_items(self.project):
             k = kind(rec.asset_class)
+            if rec.asset_class == "character":
+                it = QTreeWidgetItem(chars, [rec.name])
+                it.setData(0, ROLE_DIR, str(d))
+                v = rec.get_version()
+                if v and v.file:
+                    it.setIcon(0, QIcon(checker_pixmap(d / v.file, 28)))
+                if select and Path(select) == d:
+                    target = it
+                continue
             if k.id not in groups:
                 groups[k.id] = QTreeWidgetItem(assets, [f"{k.icon}  {k.label}"])
                 groups[k.id].setData(0, ROLE_NODE, "group")
@@ -166,7 +175,11 @@ class ProjectView(QWidget):
     def _open_item(self, d: Path) -> None:
         key = str(d)
         if key not in self.cache:
-            w = ItemWorkspace(self.queue, self.project, d, _styles(self.project), _pipelines())
+            import json
+
+            is_char = json.loads((d / "item.json").read_text(encoding="utf-8")).get("asset_class") == "character"
+            cls = CharacterWorkspace if is_char else ItemWorkspace
+            w = cls(self.queue, self.project, d, _styles(self.project), _pipelines())
             w.changed.connect(lambda d=d: self._item_changed(d))
             self.cache[key] = w
             self.stack.addWidget(w)
@@ -180,11 +193,16 @@ class ProjectView(QWidget):
     def _section(self, node: str) -> QWidget:
         if node in self.cache:
             return self.cache[node]
-        from ggs.ui.pages import AnimatePage, AppState, CharactersPage, StylesPage
+        from ggs.ui.pages import AnimatePage, AppState, StylesPage
 
         state = AppState(self.queue)
         state.project = self.project
-        page = {"characters": CharactersPage, "animations": AnimatePage, "styles": StylesPage}.get(node)
+        if node == "characters":
+            ph = Placeholder("Pick a character on the left, or press  + New  and choose Character.")
+            self.cache[node] = ph
+            self.stack.addWidget(ph)
+            return ph
+        page = {"animations": AnimatePage, "styles": StylesPage}.get(node)
         w = page(state) if page else self.welcome
         if page:
             self.cache[node] = w
@@ -199,12 +217,6 @@ class ProjectView(QWidget):
         dlg.exec()
 
     def _create(self, kind_id: str, name: str, size: str, describe: str) -> None:
-        if kind_id == "character":
-            self.stack.setCurrentWidget(self._section("characters"))
-            page = self.cache["characters"]
-            page.prompt.setText(describe)
-            page.name.setText(name)
-            return
         from ggs.items import item_dir
 
         d = item_dir(self.project, kind_id, name)
@@ -220,8 +232,8 @@ class ProjectView(QWidget):
                 return
             self.refresh(select=d)
             w = self.cache.get(str(d))
-            if w is not None:  # start the first drawing right away
-                w._run("new", describe)
+            if w is not None and kind_id != "character":  # assets start drawing right away; characters wait
+                w._run("new", describe)                     # for the body & pose to be set
 
         job.done = done
         self.queue.submit(job)

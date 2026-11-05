@@ -405,3 +405,23 @@ class Placeholder(QWidget):
         lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(lab)
 
+
+
+class CharacterWorkspace(ItemWorkspace):
+    """A character: the item workspace plus the body & pose editor on the left."""
+
+    def __init__(self, queue: JobQueue, project: Path, item_dir: Path, styles: list[str], models: list[str]):
+        super().__init__(queue, project, item_dir, styles, models)
+        from ggs.items import CharacterSettings
+        from ggs.ui.character_editor import BodyPoseEditor
+
+        self.editor = BodyPoseEditor(self.rec.settings.character or CharacterSettings())
+        self.editor.changed.connect(self._character_changed)
+        self.layout().insertWidget(0, self.editor)
+
+    def _character_changed(self, cs) -> None:
+        self.rec.settings.character = cs
+        (self.dir / "item.json").write_text(self.rec.model_dump_json(indent=1), encoding="utf-8")
+        if self.rec.versions:
+            self.input.setPlaceholderText("Pose or body changed: press Regenerate to draw it in the new pose, "
+                                          "or type a change to refine the current drawing")

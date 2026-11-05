@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
 import yaml
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel
 
 from ggs.paths import registry_path
 
@@ -19,8 +19,8 @@ class ModelEntry(BaseModel):
     name: str
     license: str
     commercial: Literal["yes", "no", "verify"]
-    min_vram_gb: Optional[float] = None
-    base: Optional[str] = None  # for LoRAs: id of the base model they were trained on
+    min_vram_gb: float | None = None
+    base: str | None = None  # for LoRAs: id of the base model they were trained on
     source: str
     notes: str = ""
 

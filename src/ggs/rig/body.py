@@ -78,8 +78,15 @@ def parse_body(text: str | None) -> BodyShape:
     return BodyShape(**values)
 
 
+def _base(bone: str) -> str:
+    for suffix in ("_near", "_far", "_l", "_r"):
+        if bone.endswith(suffix):
+            return bone[: -len(suffix)]
+    return bone
+
+
 def _group(bone: str) -> str | None:
-    base = bone.removesuffix("_near").removesuffix("_far")
+    base = _base(bone)
     for g, names in _GROUPS.items():
         if base in names:
             return g
@@ -89,8 +96,9 @@ def _group(bone: str) -> str | None:
 def standing_height(lengths: dict[str, float], head_scale: float = 1.0) -> float:
     """Ground to the top of the skull, standing straight (feet and skull extents as the programmer art draws
     them): leg + pelvis + torso + head, plus the foot's thickness and the skull above the head bone's end."""
-    return (lengths["thigh_near"] + lengths["shin_near"] + lengths["pelvis"] + lengths["torso"] + lengths["head"]
-            + 0.026 + 0.026 * head_scale)
+    side = "near" if "thigh_near" in lengths else "l"
+    return (lengths[f"thigh_{side}"] + lengths[f"shin_{side}"] + lengths["pelvis"] + lengths["torso"]
+            + lengths["head"] + 0.026 + 0.026 * head_scale)
 
 
 def body_lengths(rig: RigSpec, body: BodyShape) -> dict[str, float]:
@@ -100,7 +108,7 @@ def body_lengths(rig: RigSpec, body: BodyShape) -> dict[str, float]:
     for name, length in rest.items():
         g = _group(name)
         out[name] = length * (getattr(body, g) if g else 1.0)
-        if name.removesuffix("_near").removesuffix("_far") == "foot":
+        if _base(name) == "foot":
             out[name] = length * (1.0 + body.legs) / 2  # feet follow the legs halfway
     k = standing_height(rest) / standing_height(out, body.head)
     return {n: round(v * k, 5) for n, v in out.items()}
@@ -111,6 +119,6 @@ def body_scale(rig: RigSpec, body: BodyShape) -> float:
     rest = {b.name: b.rest_length for b in rig.bones}
     raw = {n: rest[n] * (getattr(body, g) if (g := _group(n)) else 1.0) for n in rest}
     for n in raw:
-        if n.removesuffix("_near").removesuffix("_far") == "foot":
+        if _base(n) == "foot":
             raw[n] = rest[n] * (1.0 + body.legs) / 2
     return standing_height(rest) / standing_height(raw, body.head)

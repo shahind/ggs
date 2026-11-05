@@ -393,3 +393,35 @@ def test_items_in_unity_and_defold(item_pkg):
     assert 'id: "hand_near_item_sword"' in coll and 'children: "hand_near_item_sword"' in coll
     assert (pkg_dir / "parts" / "item_sword.png").exists()
     assert "item_sword.png" in (pkg_dir / "programmer_art.atlas").read_text(encoding="utf-8")
+
+
+def test_front_rig_side_attachments_in_godot(tmp_path):
+    """Front-view rig: shoulders and hips sit beside their parent (attach_side); Godot must place them the same."""
+    from ggs.rig.master import pose_clip
+    from ggs.rig.poses import pose_angles
+
+    rig = load_rig_spec(rigs_dir() / "humanoid_front_v1.yaml")
+    character = load_character(make_programmer_art(rig, tmp_path / "pa", px_per_height=400))
+    clip = pose_clip(rig, pose_angles("front", "t_pose"), character.spec.bone_lengths)
+    clip.root.y = [-0.5]
+    out = write_rig_package(rig, character, {"tpose": clip}, tmp_path / "pkg", H)
+    write_godot(out)
+    pkg = load_package(out)
+    nodes, anims = parse_tscn(next(out.glob("*.tscn")).read_text(encoding="utf-8"))
+    anim = next(iter(anims.values()))
+    tracks = dict(zip(anim["paths"], anim["values"]))
+    want = expected(out)["tpose"][0]
+    world = {}
+    for b in pkg.ordered_bones():
+        path = "/".join(pkg.bone_path(b))
+        pos = vec2(nodes[path]["props"]["position"])
+        if f"{path}:position" in tracks:
+            pos = next(vec2(v) for v in re.findall(r"Vector2\([^)]*\)", tracks[f"{path}:position"]))
+        rot = float(json.loads(tracks[f"{path}:rotation"])[0])
+        parent = pkg.bone(b)["parent"]
+        world[b] = compose(world[parent] if parent else (0j, 1 + 0j, 1.0), (pos, cmath.exp(1j * rot), 1.0))
+        assert abs(world[b][0] - want[b][0]) < TOL_PX, b
+    # T-pose: the shoulders are mirror images about the spine
+    l, r = want["upper_arm_l"][0], want["upper_arm_r"][0]
+    spine_x = want["head"][0].real
+    assert abs((spine_x - l.real) - (r.real - spine_x)) < 0.5 and l.real < spine_x < r.real

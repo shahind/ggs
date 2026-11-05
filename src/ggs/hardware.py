@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from typing import Optional
 
 STANDARD_MIN_GB = 12.0
 LITE_MIN_GB = 7.0
 
 
-def detect_vram_gb() -> Optional[float]:
+def detect_vram_gb() -> float | None:
     """Total VRAM of GPU 0 in GB, or None if no NVIDIA GPU can be found."""
     try:
         import torch  # type: ignore
@@ -35,7 +34,7 @@ def detect_vram_gb() -> Optional[float]:
         return None
 
 
-def profile_for(vram_gb: Optional[float]) -> str:
+def profile_for(vram_gb: float | None) -> str:
     """Map VRAM to a profile name: standard, lite, minimal, or no-gpu."""
     if vram_gb is None:
         return "no-gpu"

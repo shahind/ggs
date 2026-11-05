@@ -112,7 +112,7 @@ def write_rig_package(rig: RigSpec, character: Character, clips: dict[str, Clip]
         "image": "parts.png",
         "image_size": {"w": sw, "h": sh},
         "bones": [{"name": b.name, "parent": b.parent, "length": round(lengths[b.name] * height_px, 3),
-                   "attach": b.attach} for b in rig.bones],
+                   "attach": b.attach, "attach_side_px": round(b.attach_side * height_px, 3)} for b in rig.bones],
         "rest_pose": {"root": {"x": 0.0, "y": round(-hip * height_px, 3)},
                       "angles": rest_angles},
         "parts": parts_json,
@@ -161,7 +161,8 @@ def load_rig_package(path: str | Path) -> tuple[Puppet, dict[str, Clip], dict]:
         raise ValueError(f"{path}: not a ggs.rig_package v1")
     H = float(doc["height_px"])
     atlas = Image.open(path / doc["image"]).convert("RGBA")
-    bones = [BoneDef(b["name"], b["parent"], b["attach"]) for b in doc["bones"]]
+    h = doc.get("height_px") or 1.0
+    bones = [BoneDef(b["name"], b["parent"], b["attach"], b.get("attach_side_px", 0.0) / h) for b in doc["bones"]]
     lengths = {b["name"]: b["length"] / H for b in doc["bones"]}
     parts: dict[str, PartImage] = {}
     for p in doc["parts"]:

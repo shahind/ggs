@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import math
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -109,6 +110,9 @@ PANTS = (64, 66, 98)
 SHOE = (96, 62, 42)
 EYE = (30, 30, 40)
 
+# front view: the body is seen across its width, not its depth
+FRONT_WIDTH = {"torso": 1.75, "pelvis": 1.6, "foot": 1.5}
+
 # part name -> (fill colour, width in standing heights)
 _STYLE = {
     "head": (SKIN, 0.050),  # neck width; the skull is a circle
@@ -123,7 +127,7 @@ _STYLE = {
 }
 
 
-def _capsule(draw, p0, p1, width, fill, outline_px, start_cap=True):
+def _capsule(draw, p0, p1, width, fill, outline_px, start_cap=True, end_cap=True):
     def cap(p, r, color):
         draw.ellipse([p[0] - r, p[1] - r, p[0] + r, p[1] + r], fill=color)
 
@@ -131,12 +135,14 @@ def _capsule(draw, p0, p1, width, fill, outline_px, start_cap=True):
         draw.line([p0, p1], fill=color, width=max(1, round(w)))
         if start_cap:
             cap(p0, w / 2, color)
-        cap(p1, w / 2, color)
+        if end_cap:
+            cap(p1, w / 2, color)
 
 
-def _head(draw, pivot, d, length, s, variant, outline_px, skull: float = 1.0, neck: float = 1.0):
-    """Neck capsule + skull circle + a face on the forward (screen right) side. ``skull``/``neck`` scale the
-    skull radius and neck width (body shapes)."""
+def _head(draw, pivot, d, length, s, variant, outline_px, skull: float = 1.0, neck: float = 1.0,
+          front: bool = False):
+    """Neck capsule + skull circle + a face on the forward (screen right) side, or looking at the camera when
+    ``front``. ``skull``/``neck`` scale the skull radius and neck width (body shapes)."""
     neck_end = (pivot[0] + d[0] * length * 0.35, pivot[1] + d[1] * length * 0.35)
     _capsule(draw, pivot, neck_end, 0.05 * s * neck, SKIN, outline_px)
     c = (pivot[0] + d[0] * length * 0.62, pivot[1] + d[1] * length * 0.62)
@@ -144,6 +150,9 @@ def _head(draw, pivot, d, length, s, variant, outline_px, skull: float = 1.0, ne
     draw.ellipse([c[0] - r - outline_px, c[1] - r - outline_px, c[0] + r + outline_px, c[1] + r + outline_px],
                  fill=OUTLINE)
     draw.ellipse([c[0] - r, c[1] - r, c[0] + r, c[1] + r], fill=SKIN)
+    if front:
+        _front_face(draw, c, r, variant)
+        return
     # hair cap on the back/top
     draw.pieslice([c[0] - r, c[1] - r, c[0] + r, c[1] + r], 150, 300, fill=OUTLINE)
     ex, ey, er = c[0] + 0.45 * r, c[1] - 0.15 * r, 0.12 * r
@@ -164,6 +173,28 @@ def _head(draw, pivot, d, length, s, variant, outline_px, skull: float = 1.0, ne
     # nose
     draw.polygon([(c[0] + r * 0.92, c[1] - r * 0.05), (c[0] + r * 1.12, c[1] + r * 0.18),
                   (c[0] + r * 0.9, c[1] + r * 0.22)], fill=SKIN, outline=OUTLINE)
+
+
+def _front_face(draw, c, r, variant) -> None:
+    draw.chord([c[0] - r, c[1] - r, c[0] + r, c[1] + r], 180, 360, fill=OUTLINE)  # hair on top
+    draw.rectangle([c[0] - r, c[1] - 0.05 * r, c[0] + r, c[1] + 0.02 * r], fill=SKIN)
+    er = 0.12 * r
+    for sx in (-0.38, 0.38):
+        ex, ey = c[0] + sx * r, c[1] + 0.2 * r
+        if variant == "blink":
+            draw.line([(ex - er * 1.5, ey), (ex + er * 1.5, ey)], fill=EYE, width=max(1, round(er * 0.8)))
+        elif variant == "hurt":
+            for sgn in (-1, 1):
+                draw.line([(ex - er * 1.3, ey - sgn * er * 1.3), (ex + er * 1.3, ey + sgn * er * 1.3)],
+                          fill=EYE, width=max(1, round(er * 0.7)))
+        else:
+            draw.ellipse([ex - er, ey - er, ex + er, ey + er], fill=EYE)
+    mx, my = c[0], c[1] + 0.6 * r
+    if variant == "mouth_open":
+        mr = 0.16 * r
+        draw.ellipse([mx - mr, my - mr, mx + mr, my + mr], fill=EYE)
+    else:
+        draw.line([(mx - 0.2 * r, my), (mx + 0.2 * r, my)], fill=EYE, width=max(1, round(0.06 * r)))
 
 
 def make_programmer_art(rig: RigSpec, out_dir: str | Path, px_per_height: float = 600.0,
@@ -190,6 +221,7 @@ def make_programmer_art(rig: RigSpec, out_dir: str | Path, px_per_height: float 
         widen, skull = body.width * f, body.head * f
     s = px_per_height * k
     outline_px = max(1.0, 0.006 * s)
+    front = rig.view == "front"
 
     def cell_draw(cell_xy):
         layer = Image.new("RGBA", (cell * k, cell * k), (0, 0, 0, 0))
@@ -205,13 +237,15 @@ def make_programmer_art(rig: RigSpec, out_dir: str | Path, px_per_height: float 
         length = lengths[part.bone] * s
         dx, dy = bone_vector(part.art_angle, 1.0)
         end = (pivot[0] + dx * length, pivot[1] + dy * length)
-        fill, width = _STYLE.get(part.name, (SHIRT, 0.06))
-        width *= widen
+        base = re.sub(r"_(l|r|near|far)$", "", part.name)
+        fill, width = _STYLE.get(base, (SHIRT, 0.06))
+        width *= widen * (FRONT_WIDTH.get(base, 1.0) if front else 1.0)
         if part.name == "head":
-            _head(draw, pivot, (dx, dy), length, s, variant, outline_px, skull=skull, neck=widen)
+            _head(draw, pivot, (dx, dy), length, s, variant, outline_px, skull=skull, neck=widen, front=front)
         elif part.name == "torso":  # flat hem at the hips (the pelvis covers it); keeps the cell edge clear
-            _capsule(draw, pivot, end, width * s, fill, outline_px, start_cap=False)
-        elif part.name == "foot":
+            # front view: square shoulders (a round top reads as a hood behind the head)
+            _capsule(draw, pivot, end, width * s, fill, outline_px, start_cap=False, end_cap=not front)
+        elif base == "foot" and not front:
             _capsule(draw, (pivot[0] - 0.02 * s, pivot[1]), end, width * s, fill, outline_px)
         else:
             _capsule(draw, pivot, end, width * s, fill, outline_px)

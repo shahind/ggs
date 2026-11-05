@@ -19,6 +19,49 @@ MASTER_PROMPT = (
 )
 
 
+VIEW_WORDS = {"side": "side view facing right", "front": "front view facing the viewer, symmetrical stance"}
+CHARACTER_PROMPT = (
+    "{style}Redraw the figure in the image as {description}{body}. Keep exactly the same pose, body proportions, "
+    "size and position. Full body, {view}, flat 2D game character art with clean outlines, plain flat pure white "
+    "background, no shadow, no text"
+)
+CHARACTER_EDIT = ("{instruction}. Keep everything else exactly the same: the same character, pose, proportions, "
+                  "position and drawing style, plain flat pure white background.")
+
+
+def draw_character(guide, description: str, *, view: str, body=None, seeds: list[int], model: str,
+                   profile: str = "lite", lora=None, lora_scale: float = 1.0, style: str = "",
+                   edit_of=None, instruction: str = "", enforce_vram: bool = True) -> list[tuple]:
+    """Draw a character over a pose guide (or edit a previous drawing ``edit_of`` with ``instruction``).
+    Returns [(rgba array on the guide canvas, raw RGB image, seed)] per seed."""
+    from ggs.generate import build_backends, real_rgba
+    from ggs.pipeline.vram import Stages
+    from ggs.recipes import load_recipe
+
+    recipe = load_recipe("sprite")
+    gen, matter = build_backends(recipe, model, profile)
+    if not getattr(gen, "supports_reference", False):
+        raise ValueError(f"{model!r} cannot draw over a pose guide; characters need flux2-klein-4b")
+    size = guide.image.size[0]
+    if edit_of is not None:
+        prompt = CHARACTER_EDIT.format(instruction=instruction.strip().rstrip("."))
+        ref = edit_of
+    else:
+        words = body.describe() if body is not None else ""
+        prompt = CHARACTER_PROMPT.format(style=style, description=description.strip(),
+                                         body=f", with {words}" if words else "", view=VIEW_WORDS[view])
+        ref = on_white(guide.image)
+    prompt = " ".join(prompt.split())
+    stages = Stages(profile=profile, enforce=enforce_vram)
+    images = gen.generate(prompt, seeds, size, size, stages, lora=lora, lora_scale=lora_scale, reference=[ref])
+    alphas = matter.alphas(images, stages)
+    out = []
+    for seed, img, alpha in zip(seeds, images, alphas):
+        rgba, _, _ = real_rgba(img, alpha, recipe.post.alpha_low, recipe.post.alpha_high)
+        out.append((rgba, img, seed))
+    return out
+
+
 def guide_puppet(rig: RigSpec, body=None):
     """The programmer-art puppet (drawn on the fly, in ``body``'s proportions) and its bone lengths."""
     from ggs.rig.character import load_character, make_programmer_art

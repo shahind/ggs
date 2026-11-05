@@ -1,0 +1,78 @@
+# Rig Spec v1, front view: a humanoid seen from the front (T-pose / A-pose characters, Unity 2D Animation style).
+# Conventions as the side rig: screen space (+x right, +y down), angles clockwise from straight down.
+# Sides are SCREEN sides: _l = the left of the picture (the character's right hand), _r = the right of the picture.
+# attach_side moves a bone's start sideways along the parent's local x axis, in standing heights; for a parent
+# pointing up (torso, pelvis) +x is screen left. Shoulders and hips use it.
+# No mocap profile yet: motion capture is retargeted to the side view only (front retargeting is future work).
+id: humanoid_front_v1
+version: 1
+view: front
+facing: front
+near_side: none
+
+bones:
+  - {name: pelvis,      parent: null,        rest_length: 0.07}
+  - {name: torso,       parent: pelvis,      rest_length: 0.28}
+  - {name: head,        parent: torso,       rest_length: 0.13}
+  - {name: upper_arm_l, parent: torso,       rest_length: 0.15, attach: 0.92, attach_side: 0.105}
+  - {name: forearm_l,   parent: upper_arm_l, rest_length: 0.14}
+  - {name: hand_l,      parent: forearm_l,   rest_length: 0.07}
+  - {name: upper_arm_r, parent: torso,       rest_length: 0.15, attach: 0.92, attach_side: -0.105}
+  - {name: forearm_r,   parent: upper_arm_r, rest_length: 0.14}
+  - {name: hand_r,      parent: forearm_r,   rest_length: 0.07}
+  - {name: thigh_l,     parent: pelvis,      rest_length: 0.24, attach: 0.0, attach_side: 0.05}
+  - {name: shin_l,      parent: thigh_l,     rest_length: 0.24}
+  - {name: foot_l,      parent: shin_l,      rest_length: 0.06}
+  - {name: thigh_r,     parent: pelvis,      rest_length: 0.24, attach: 0.0, attach_side: -0.05}
+  - {name: shin_r,      parent: thigh_r,     rest_length: 0.24}
+  - {name: foot_r,      parent: shin_r,      rest_length: 0.06}
+
+# Back to front. Legs behind the pelvis, arms in front of the torso, the head last.
+draw_order:
+  - thigh_l
+  - shin_l
+  - foot_l
+  - thigh_r
+  - shin_r
+  - foot_r
+  - pelvis
+  - torso
+  - upper_arm_l
+  - forearm_l
+  - hand_l
+  - upper_arm_r
+  - forearm_r
+  - hand_r
+  - head
+
+part_sheet:
+  cell_px: 256
+  cols: 5
+  rows: 4
+  parts:
+    - {name: head,        bone: head,        cell: [0, 0], pivot: [0.50, 0.76], art_angle: 180}
+    - {name: torso,       bone: torso,       cell: [1, 0], pivot: [0.50, 0.83], art_angle: 180}
+    - {name: pelvis,      bone: pelvis,      cell: [2, 0], pivot: [0.50, 0.50], art_angle: 180}
+    - {name: upper_arm_l, bone: upper_arm_l, cell: [3, 0], pivot: [0.50, 0.15]}
+    - {name: forearm_l,   bone: forearm_l,   cell: [4, 0], pivot: [0.50, 0.15]}
+    - {name: hand_l,      bone: hand_l,      cell: [0, 1], pivot: [0.50, 0.15]}
+    - {name: upper_arm_r, bone: upper_arm_r, cell: [1, 1], pivot: [0.50, 0.15]}
+    - {name: forearm_r,   bone: forearm_r,   cell: [2, 1], pivot: [0.50, 0.15]}
+    - {name: hand_r,      bone: hand_r,      cell: [3, 1], pivot: [0.50, 0.15]}
+    - {name: thigh_l,     bone: thigh_l,     cell: [4, 1], pivot: [0.50, 0.15]}
+    - {name: shin_l,      bone: shin_l,      cell: [0, 2], pivot: [0.50, 0.15]}
+    - {name: foot_l,      bone: foot_l,      cell: [1, 2], pivot: [0.50, 0.20]}
+    - {name: thigh_r,     bone: thigh_r,     cell: [2, 2], pivot: [0.50, 0.15]}
+    - {name: shin_r,      bone: shin_r,      cell: [3, 2], pivot: [0.50, 0.15]}
+    - {name: foot_r,      bone: foot_r,      cell: [4, 2], pivot: [0.50, 0.20]}
+  head_variants:
+    - {name: blink,      cell: [0, 3]}
+    - {name: mouth_open, cell: [1, 3]}
+    - {name: hurt,       cell: [2, 3]}
+
+sockets:
+  - {name: grip_l,   bone: hand_l, t: 0.5, offset: 0.0}
+  - {name: grip_r,   bone: hand_r, t: 0.5, offset: 0.0}
+  - {name: head_top, bone: head,   t: 1.0, offset: 0.0}
+
+mocap_profiles: {}

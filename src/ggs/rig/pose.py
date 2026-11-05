@@ -17,10 +17,11 @@ class BoneDef:
     name: str
     parent: str | None
     attach: float = 1.0
+    attach_side: float = 0.0  # standing heights along the parent's local x (see RIG_SPEC_V1)
 
 
 def bone_defs(spec: RigSpec) -> list[BoneDef]:
-    return [BoneDef(b.name, b.parent, b.attach) for b in spec.bones]
+    return [BoneDef(b.name, b.parent, b.attach, b.attach_side) for b in spec.bones]
 
 
 def bone_vector(angle_deg: float, length: float) -> Point:
@@ -79,6 +80,9 @@ def pose_bones(
             (px0, py0), (px1, py1) = place(bone.parent)
             t = bone.attach
             start = (px0 + t * (px1 - px0), py0 + t * (py1 - py0))
+            if bone.attach_side:  # local +x of the parent: (cos a, sin a) for parent angle a
+                a = math.radians(clip.angles[bone.parent][frame])
+                start = (start[0] + bone.attach_side * math.cos(a), start[1] + bone.attach_side * math.sin(a))
         dx, dy = bone_vector(clip.angles[name][frame], lengths[name])
         out[name] = (start, (start[0] + dx, start[1] + dy))
         return out[name]

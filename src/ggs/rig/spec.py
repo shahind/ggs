@@ -14,6 +14,9 @@ class Bone(BaseModel):
     rest_length: float = Field(gt=0)
     # Where this bone starts on its parent: t along the parent bone (0 = parent start, 1 = parent end).
     attach: float = Field(default=1.0, ge=0, le=1)
+    # ... and sideways, in standing heights along the parent's local x axis (the bone axis is local +y; for a
+    # parent pointing up, +x is screen left). Front-view rigs use it for shoulders and hips.
+    attach_side: float = 0.0
 
 
 class Part(BaseModel):

@@ -9,7 +9,7 @@ using UnityEngine;
 namespace Ggs
 {
     [Serializable] public class GgsRect { public float x, y, w, h; }
-    [Serializable] public class GgsBone { public string name; public string parent; public float length; public float attach; }
+    [Serializable] public class GgsBone { public string name; public string parent; public float length; public float attach; public float attachSidePx; }
     [Serializable] public class GgsPart
     {
         public string name; public string[] bones; public GgsRect rect; public float pivotX, pivotY;
@@ -106,7 +106,7 @@ namespace Ggs
                 if (!string.IsNullOrEmpty(b.parent))
                 {
                     float plen = Array.Find(data.bones, x => x.name == b.parent).length;
-                    go.transform.localPosition = new Vector3(0f, -b.attach * plen / pixelsPerUnit, 0f);
+                    go.transform.localPosition = new Vector3(b.attachSidePx / pixelsPerUnit, -b.attach * plen / pixelsPerUnit, 0f);
                 }
                 boneT[b.name] = go.transform;
             }

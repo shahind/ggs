@@ -22,7 +22,7 @@ def gen(project, ref, **kw):
 
 
 def test_create_and_lookup(project):
-    rec, d = I.create(project, "sprite", "Health potion", "a red health potion")
+    _, d = I.create(project, "sprite", "Health potion", "a red health potion")
     assert d == project / "items" / "sprite" / "health_potion" and (d / "item.json").exists()
     assert I.load(project, "Health potion")[0].name == "Health potion"
     assert I.load(project, "sprite/Health potion")[1] == d

@@ -790,11 +790,15 @@ def cmd_ui(args: argparse.Namespace) -> int:
 
 
 def cmd_asset_new(args: argparse.Namespace) -> int:
-    from ggs.items import ItemError, ItemSettings, create
+    from ggs.items import CharacterSettings, ItemError, ItemSettings, create
+    from ggs.rig.poses import DEFAULT
 
     try:
-        rec, d = create(Path(args.project), args.asset_class, args.name, args.describe or "",
-                        ItemSettings(size=args.size, style=args.style))
+        settings = ItemSettings(size=args.size, style=args.style)
+        if args.asset_class == "character":
+            settings.character = CharacterSettings(view=args.view, body_preset=args.body,
+                                                   pose=args.pose or DEFAULT[args.view])
+        rec, d = create(Path(args.project), args.asset_class, args.name, args.describe or "", settings)
     except (ItemError, ValueError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -986,7 +990,10 @@ def build_parser() -> argparse.ArgumentParser:
     ast = ast.add_subparsers(dest="asset_cmd", required=True)
     an = ast.add_parser("new", help="create a named item in a project")
     an.add_argument("name")
-    an.add_argument("--class", dest="asset_class", required=True, choices=available_recipes())
+    an.add_argument("--class", dest="asset_class", required=True, choices=[*available_recipes(), "character"])
+    an.add_argument("--view", default="front", choices=["front", "side"], help="characters: front or side view")
+    an.add_argument("--body", default="standard", help="characters: body preset (standard, chibi, heroic, ...)")
+    an.add_argument("--pose", default=None, help="characters: t_pose, a_pose, idle (front); idle, walk, spread (side)")
     an.add_argument("--project", required=True)
     an.add_argument("--describe", default="", help="what it is (used by the first generation)")
     an.add_argument("--size", default="medium", choices=["small", "medium", "large", "full"],

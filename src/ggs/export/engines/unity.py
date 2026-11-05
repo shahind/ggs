@@ -41,7 +41,8 @@ def unity_rig_json(package_dir: str | Path) -> dict:
         "atlasW": d["image_size"]["w"],
         "atlasH": d["image_size"]["h"],
         "bones": [{"name": b, "parent": pkg.bone(b)["parent"] or "", "length": pkg.bone(b)["length"],
-                   "attach": pkg.bone(b)["attach"]} for b in pkg.ordered_bones()],
+                   "attach": pkg.bone(b)["attach"], "attachSidePx": pkg.bone(b).get("attach_side_px", 0.0)}
+                  for b in pkg.ordered_bones()],
         "parts": [{"name": p["name"], "bones": p["bones"], "rect": p["rect"], "pivotX": p["pivot"]["x"],
                    "pivotY": p["pivot"]["y"], "artAngle": p["art_angle"], "lengthPx": p["length_px"],
                    "farTint": p["far_tint"]} for p in d["parts"]],
