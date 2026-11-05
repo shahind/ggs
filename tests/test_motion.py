@@ -147,3 +147,19 @@ def test_motion_make_end_to_end(tmp_path):
     clip = json.loads(out.read_text(encoding="utf-8"))
     assert clip["profile"] == "soma" and clip["frame_count"] >= 40
     assert out.with_suffix(".gif").is_file() and out.with_suffix(".bvh").is_file()
+
+
+def test_export_credits_only_for_catalog_motions(tmp_path):
+    from ggs.rig.library import credits_for, write_credits
+
+    a, b, c = tmp_path / "a.json", tmp_path / "b.json", tmp_path / "c.json"
+    (tmp_path / "a.motion.json").write_text(json.dumps({"catalog": "100style", "name": "Walk (angry)",
+                                                        "credit": "The 100STYLE Dataset - Ian Mason",
+                                                        "license": "CC BY 4.0"}), encoding="utf-8")
+    (tmp_path / "b.motion.json").write_text(json.dumps({"prompt": "A person waves.", "model": "kimodo-soma"}),
+                                            encoding="utf-8")
+    lines = credits_for([a, b, c])
+    assert len(lines) == 1 and "Ian Mason" in lines[0] and "Walk (angry)" in lines[0]
+    assert write_credits([b, c], tmp_path / "none.txt") is None
+    out = write_credits([a], tmp_path / "CREDITS.txt")
+    assert "CC BY 4.0" in out.read_text(encoding="utf-8")

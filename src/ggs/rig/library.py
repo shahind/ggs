@@ -122,3 +122,34 @@ def add_to(names: list[str], dest: Path, lib: Library | None = None) -> list[Pat
                 shutil.copy2(f, dest / f.name)
         out.append(dest / src.name)
     return out
+
+
+def credits_for(clip_paths: list[Path]) -> list[str]:
+    """Credit lines the motions in ``clip_paths`` need (from their .motion.json sidecars), one per source.
+    Motions made with Kimodo need none; CMU asks for one, 100STYLE (CC BY 4.0) requires one."""
+    lines: dict[str, list[str]] = {}
+    for c in clip_paths:
+        side = sidecar(Path(c))
+        if not side.is_file():
+            continue
+        try:
+            meta = json.loads(side.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if meta.get("catalog") and meta.get("credit"):
+            key = f"{meta['credit']} ({meta.get('license', 'see the source')})"
+            lines.setdefault(key, []).append(meta.get("name") or Path(c).stem)
+    return [f"{credit}\n    used by: {', '.join(sorted(set(names)))}" for credit, names in lines.items()]
+
+
+def write_credits(clip_paths: list[Path], dest: Path) -> Path | None:
+    """``CREDITS.txt`` for an export, or nothing when no motion in it needs a credit."""
+    lines = credits_for(clip_paths)
+    if not lines:
+        return None
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    head = ("Put these lines in your game's credits (or its About / store page).\n"
+            "They come from the motion libraries the animations in this export were taken from.\n\n")
+    dest.write_text(head + "\n\n".join(lines) + "\n", encoding="utf-8")
+    return dest
+

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -774,6 +775,10 @@ def cmd_clip_layer(args: argparse.Namespace) -> int:
         bones = args.bones if args.bones in BONE_SETS else tuple(b.strip() for b in args.bones.split(","))
         clip = layer_clips(load_clip(args.base), load_clip(args.over), rig, bones)
         clip.save(args.out)
+        from ggs.rig.library import sidecar
+
+        if sidecar(Path(args.base)).is_file():  # keep where the base motion came from (credits)
+            shutil.copy2(sidecar(Path(args.base)), sidecar(Path(args.out)))
     except (ValueError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -1052,6 +1057,7 @@ def cmd_export(args: argparse.Namespace) -> int:
                 print(f"wrote {write_defold(out, args.defold_path)}")
             if args.format != "rig":
                 print(f"see {out / ('README_' + args.format.upper() + '.txt')}")
+            _export_credits(args.clip, Path(out) / "CREDITS.txt")
             return 0
         if args.format == "gif" and not args.matte:
             raise ExportError("GIF has 1-bit alpha; pass --matte #RRGGBB (your game's background colour)")
@@ -1074,7 +1080,16 @@ def cmd_export(args: argparse.Namespace) -> int:
         return 1
     w, h = frames[0].size
     print(f"wrote {out}: {clip.frame_count} frames of {w}x{h} px, pivot {anchor}")
+    _export_credits(args.clip, Path(out).with_name(Path(out).stem + "_CREDITS.txt"))
     return 0
+
+
+def _export_credits(clip: str, dest: Path) -> None:
+    from ggs.rig.library import write_credits
+
+    p = write_credits([Path(clip)], dest)
+    if p:
+        print(f"wrote {p}: credit lines for the motion libraries used")
 
 
 def build_parser() -> argparse.ArgumentParser:
