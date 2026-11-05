@@ -145,6 +145,15 @@ def build(dist: Path, skip_site: bool = False) -> Path:
         n = copy_tree(site, psite, SITE_SKIP)
         print(f"  {n / 2**30:.2f} GB copied")
         print(f"  Qt trimmed: {trim_qt(psite / 'PySide6') / 2**20:.0f} MB removed")
+    else:
+        # quick build: still bring in packages added to the venv since the last full build (new dependencies)
+        for p in sorted(site.iterdir()):
+            if not _skip(p.name, SITE_SKIP) and not (psite / p.name).exists():
+                print(f"  new package {p.name}")
+                if p.is_dir():
+                    copy_tree(p, psite / p.name, SITE_SKIP)
+                else:
+                    shutil.copy2(p, psite / p.name)
     if (psite / "ggs").exists():
         shutil.rmtree(psite / "ggs")
     copy_tree(ROOT / "src" / "ggs", psite / "ggs", ["__pycache__", "*/__pycache__"])
@@ -183,7 +192,7 @@ def build(dist: Path, skip_site: bool = False) -> Path:
 def check(app: Path) -> None:
     """The bundled Python must import everything from its own folder, never from the venv or the repo."""
     py = app / "python" / "python.exe"
-    code = ("import sys, ggs, torch, diffusers, transformers, PySide6.QtWidgets, PIL, ggs.paths as p;"
+    code = ("import sys, ggs, torch, diffusers, transformers, PySide6.QtWidgets, PIL, spellchecker, ggs.paths as p;"
             "print(sys.prefix); print(ggs.__file__); print(p.repo_root());"
             "print('torch', torch.__version__, 'cuda', torch.cuda.is_available())")
     out = subprocess.run([str(py), "-c", code], check=False, capture_output=True, text=True, cwd=str(app.parent))
