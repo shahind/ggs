@@ -50,3 +50,11 @@ def test_one_to_all_spec_resolves_its_three_parts(tmp_path):
     (te / "umt5_xxl_fp16.safetensors").write_bytes(b"x")
     files = resolve_frames("one-to-all-1.3b", [tmp_path], load_pipelines())
     assert set(files) == {"model", "base", "text_encoder"} and files["text_encoder"].is_file()
+
+
+def test_one_to_all_never_draws_too_short_a_clip():
+    from ggs.rig.sprites import O2A_MIN_FRAMES, o2a_frame_count
+
+    assert o2a_frame_count(8) == o2a_frame_count(12) == O2A_MIN_FRAMES == 17  # 13 frames grey out
+    assert o2a_frame_count(20) == 21 and o2a_frame_count(25) == 25
+    assert all((o2a_frame_count(n) - 1) % 4 == 0 and o2a_frame_count(n) >= n for n in range(1, 40))

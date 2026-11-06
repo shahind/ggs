@@ -283,6 +283,7 @@ def frames_method() -> str:
 ANIMATEDIFF = "animatediff-sd15"
 ONE_TO_ALL = "one-to-all-1.3b"
 AD_SIZE = (384, 512)
+O2A_MIN_FRAMES = 17
 O2A_SIZE = (384, 576)  # w, h: multiples of 16, short side 384 as One-to-All's 1.3B inference uses
 
 
@@ -297,6 +298,11 @@ def _crop_frames(rgba: list, size: tuple[int, int], pad: int = 4):
         raise ValueError("the frames came out empty")
     box = (max(0, box[0] - pad), max(0, box[1] - pad), min(size[0], box[2] + pad), min(size[1], box[3] + pad))
     return [im.crop(box) for im in rgba], (round(size[0] / 2 - box[0]), box[3] - box[1] - pad)
+
+
+def o2a_frame_count(n: int) -> int:
+    """How many frames One-to-All draws for ``n`` kept frames: 4k+1, never under ``O2A_MIN_FRAMES``."""
+    return max(O2A_MIN_FRAMES, 4 * math.ceil(max(n - 1, 4) / 4) + 1)
 
 
 def o2a_inputs(d: Path, clip, n: int):
@@ -331,7 +337,9 @@ def o2a_inputs(d: Path, clip, n: int):
     ref.paste(small, (round(ox), round(oy)), small)
     ref_pose = draw_pose(openpose_points({b: (to_canvas(s), to_canvas(e)) for b, (s, e) in joints.items()}, "side"),
                          (w, h))
-    m = 4 * math.ceil(max(n - 1, 4) / 4) + 1  # One-to-All draws 4k+1 frames
+    # One-to-All draws 4k+1 frames; at 13 or fewer the picture greys out after a few frames (measured on the
+    # owner's character: 13 fade, 17 / 25 / 33 hold), so it always draws at least O2A_MIN_FRAMES
+    m = o2a_frame_count(n)
     idx = frame_indices(clip, m)
     lengths = _design_lengths(d)
     unit = hp * k  # canvas px per standing height

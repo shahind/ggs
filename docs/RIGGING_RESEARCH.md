@@ -99,3 +99,10 @@ for any image model) and paid services (Layer.ai's Spine/Live2D parts-sheet tool
   The design on a 384x576 canvas, the clip's skeleton in the design's proportions drawn in One-to-All's pose
   style, 4k+1 frames, 30 steps with reference and pose guidance, matted with BiRefNet. umT5 is streamed and its
   embeddings cached per prompt. Default method when its models are downloaded (`frames_o2a` pack, 18 GB).
+- **One-to-All on the owner's Jones (8 GB laptop):**
+  - Clips of 13 frames grey out after frame 3: a grey background and low contrast, which matting then makes
+    see-through. 17, 25 and 33 frames hold full colour to the end.
+  - Guidance strength and float32 timestep layers made no difference.
+  - GGS now always draws at least 17 frames and keeps the number asked for.
+  - Walk and punch, 12 frames each: about 245 s per clip, 6.8 GB peak. The design is kept, and the walk and the
+    jab follow the clip; fists blur a little at the punch's peak.
