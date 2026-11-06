@@ -462,7 +462,7 @@ LAYER_BONES = {
     "eyebrow": ("head",), "eyewhite": ("head",), "eyelash": ("head",), "eyewear": ("head",), "ears": ("head",),
     "earwear": ("head",), "nose": ("head",), "mouth": ("head",), "neck": ("neck", "head"),
     "neckwear": ("chest", "torso", "neck", "head"),
-    "topwear": ("chest", "torso", "waist", "pelvis", "upper_arm", "cape", "skirt"),
+    "topwear": ("chest", "torso", "waist", "cape", "skirt"),  # sleeves come in See-through's arm layer
     "handwear": ("upper_arm", "forearm", "hand"),
     "bottomwear": ("pelvis", "waist", "skirt", "thigh", "shin"), "legwear": ("pelvis", "thigh", "shin", "skirt"),
     "footwear": ("foot", "shin"),
@@ -474,16 +474,39 @@ LAYER_ORDER = ["back hair", "tail", "wings", "neck", "head", "face", "ears", "ea
                "footwear", "topwear", "neckwear", "handwear", "objects"]
 
 
+def _limb_cuts(chain: list[str], joints) -> list[tuple[np.ndarray, np.ndarray]]:
+    """(point, normal to the child side) of the straight cut at each joint of ``chain``: the bisector of the
+    bend. A limb that hangs from the *start* of its parent (legs from the pelvis, which points up) is cut against
+    the parent reversed, so the hip cut runs across the leg, not along it."""
+    import itertools
+
+    cuts = []
+    for a, b in itertools.pairwise(chain):
+        p = np.array(joints[b][0], np.float32)
+        a0, a1 = np.array(joints[a][0], np.float32), np.array(joints[a][1], np.float32)
+        da = a1 - a0
+        if np.linalg.norm(p - a0) < np.linalg.norm(p - a1):  # attached at the parent's start
+            da = -da
+        db = np.array(joints[b][1], np.float32) - p
+        n = da / max(np.linalg.norm(da), 1e-6) + db / max(np.linalg.norm(db), 1e-6)
+        if np.linalg.norm(n) < 1e-3:
+            n = db
+        cuts.append((p, n / max(np.linalg.norm(n), 1e-6)))
+    return cuts
+
+
 def _layered_parts(master: np.ndarray, labels: np.ndarray, layers: dict, spec: MasterSpec, rig: RigSpec,
                    draw_order: list[str]) -> dict[str, CutPart]:
     """Pieces from See-through's complete layers (``ggs.pipeline.layers``).
 
-    - Each layer's opaque pixels go to the nearest of the bones that layer may belong to (``LAYER_BONES``),
-      measured against the bone's width: a whole arm layer is split at the shoulder, elbow and wrist, the
-      trousers at the hip and knee.
+    - Each layer's pixels first go to a limb (or the trunk): the nearest of the bones the layer may belong to
+      (``LAYER_BONES``), by the bone's width. Along that limb they are cut straight at every joint, on the
+      bisector of the bend, as a rigger cuts: a whole arm layer at the elbow and wrist, the trousers at the hip
+      and knee. The shirt layer only goes to the trunk (See-through draws the sleeves with the arms).
     - A piece is all its layers composited back to front. The layers are whole, so the chest under the arm and
       the trousers under the shirt are already drawn; nothing is invented.
-    - Across a joint, a piece continues a little into its neighbour with the same layer's art (OVERLAP).
+    - Across a joint, the piece drawn underneath continues in a straight strip past the cut (OVERLAP x the
+      narrower bone's width), with the same layer's art, so a bend shows no gap.
     - Pixels of the drawing the layers do not reproduce (See-through can miss a hat) keep their drawn colour and
       go with the nearest pixel the layers do explain (a hat with the hair, a collar with the shirt)."""
     from ggs.rig.skin import _seg_dist
@@ -501,14 +524,63 @@ def _layered_parts(master: np.ndarray, labels: np.ndarray, layers: dict, spec: M
     dist = {b: (_seg_dist(pts_all, *spec.joints[b]) / max(widths.get(b, 8.0), 3.0)).reshape(h, w)
             * (FAR_PENALTY if b.endswith("_far") else 1.0) for b in names}
     order = [t for t in LAYER_ORDER if t in layers] + [t for t in layers if t not in LAYER_ORDER]
+    from ggs.rig.joints import chains
+
+    # every chain a layer can be cut along: the trunk, and each limb with the bone it hangs from (pelvis + leg)
+    paths = []
+    for c in chains(rig):
+        c = [b for b in c if b in index]
+        if c and parent.get(c[0]) and parent[c[0]] in index:
+            c = [parent[c[0]], *c]
+        if c:
+            paths.append(c)
     owner: dict[str, np.ndarray] = {}  # tag -> bone index per pixel (-1: not this layer)
+    cut_pos: dict[str, tuple] = {}  # tag -> (path id per pixel, signed distance to the cut at each joint)
     for tag in order:
         a = layers[tag][..., 3] > 16
         allowed = [b for b in names if any(b == p or b.startswith(p + "_") for p in LAYER_BONES.get(tag, ()))]
         allowed = allowed or names
-        d = np.stack([dist[b] for b in allowed])
-        own = np.where(a, np.array([index[b] for b in allowed])[np.argmin(d, axis=0)], -1)
+        nearest = np.array([index[b] for b in allowed])[np.argmin(np.stack([dist[b] for b in allowed]), axis=0)]
+        own = np.where(a, nearest, -1)
+        pid = -np.ones((h, w), np.int64)
+        # which limb (or the trunk) a pixel belongs to: its nearest allowed bone that is not a shared parent
+        # (a pixel nearest the pelvis goes with the nearer leg's path, then the hip cut decides)
+        cands = [(k, [b for b in pth if b in allowed]) for k, pth in enumerate(paths)]
+        cands = [(k, bs) for k, bs in cands if bs]
+        if len(cands) > 1:
+            own_of = {}
+            for k, bs in cands:
+                tips = [b for b in bs if b != paths[k][0]] or bs
+                # which limb: plain distance (the far-side penalty only settles pixels between a bone and its
+                # neighbour, never which leg a pixel is)
+                own_of[k] = np.min(np.stack([dist[b] / (FAR_PENALTY if b.endswith("_far") else 1.0)
+                                             for b in tips]), axis=0)
+            ks = list(own_of)
+            pid = np.where(a, np.array(ks)[np.argmin(np.stack([own_of[k] for k in ks]), axis=0)], -1)
+        elif cands:
+            pid = np.where(a, cands[0][0], -1)
+        signed = {}
+        ys_, xs_ = np.nonzero(pid >= 0)
+        for k, bs in cands:
+            sel = pid[ys_, xs_] == k
+            if not sel.any():
+                continue
+            chain = [b for b in paths[k] if b in bs]
+            if len(chain) == 1:
+                own[ys_[sel], xs_[sel]] = index[chain[0]]
+                continue
+            # straight cuts along the bisector at each joint, as a rigger cuts (no curved nearest-bone edges)
+            pts = np.stack([xs_[sel], ys_[sel]], axis=1).astype(np.float32)
+            kk = np.zeros(len(pts), np.int64)
+            for i, (pp, nn) in enumerate(_limb_cuts(chain, spec.joints)):
+                d_ = (pts - pp) @ nn
+                kk = np.where((d_ > 0) & (kk == i), i + 1, kk)
+                plane = np.full((h, w), np.nan, np.float32)
+                plane[ys_[sel], xs_[sel]] = d_
+                signed[(chain[i], chain[i + 1])] = plane
+            own[ys_[sel], xs_[sel]] = np.array([index[b] for b in chain])[kk]
         owner[tag] = own
+        cut_pos[tag] = signed
     # what the layers show, stacked back to front, and which bone shows at each pixel
     comp = np.zeros((h, w, 4), np.float32)
     shown = -np.ones((h, w), np.int64)
@@ -549,11 +621,19 @@ def _layered_parts(master: np.ndarray, labels: np.ndarray, layers: dict, spec: M
         mine = np.zeros((h, w), bool)
         for tag in order:
             take = owner[tag] == index[b]
-            for nb, (jx, jy) in near:  # a little past the joint, the neighbour's pixels of the same layer,
-                if nb in index and rank.get(b, 0) < rank.get(nb, 0):  # only under a piece drawn over this one
-                    wj = min(wb, max(widths.get(nb, 8.0), 3.0))  # the narrower bone: a hat-wide head borrows
-                    band = (owner[tag] == index[nb]) & (np.hypot(xx - jx, yy - jy) <= (1.0 + OVERLAP) * wj)
-                    take |= band
+            for nb, _j in near:  # a strip past the joint's straight cut, into the neighbour's pixels of the same
+                if nb not in index or rank.get(b, 0) >= rank.get(nb, 0):  # layer, only under a piece drawn over
+                    continue
+                wj = min(wb, max(widths.get(nb, 8.0), 3.0))
+                if (nb, b) in cut_pos[tag]:  # this piece is the child: it continues back into its parent
+                    d_ = cut_pos[tag][(nb, b)]
+                    band = (owner[tag] == index[nb]) & (d_ > -OVERLAP * wj)
+                elif (b, nb) in cut_pos[tag]:  # this piece is the parent: it continues into its child
+                    d_ = cut_pos[tag][(b, nb)]
+                    band = (owner[tag] == index[nb]) & (d_ < OVERLAP * wj)
+                else:
+                    continue
+                take |= np.nan_to_num(band, nan=0).astype(bool)
             if not take.any():
                 continue
             lay = layers[tag].astype(np.float32) / 255.0

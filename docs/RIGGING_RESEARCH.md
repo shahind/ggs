@@ -166,3 +166,28 @@ frame from a skeleton.
   Remaining: some softness at knees and boots, a ragged back edge on the far side, small specks at a fist.
 - **UI:** Generated Frames > Method: Cut-Out Cleanup (default) or Generated (One-to-All). CLI:
   `ggs character frames <item> --method cutout`.
+
+### Layered cutting, second pass (owner: "the layers are good, what we do on top is the problem")
+- **Shirt:** the shirt layer goes to the trunk only; See-through draws sleeves in the arm layer. This removed
+  the notch and the sliver at the shoulder.
+- **Straight cuts:** each layer pixel first goes to a limb, by plain distance with no far-side bias, then is
+  cut straight along that limb at every joint on the bisector of the bend (`_limb_cuts`). Pelvis + leg is one
+  path: legs hang from the pelvis's start, so the hip cut uses the pelvis reversed.
+- **Overlap:** a straight strip behind each cut, on the piece drawn underneath, from the same layer and limb.
+- **Acceptance:** the layered cut is kept when it scores within 0.02 of the plain cut.
+- **Jones:** head with hat, whole shirt, clean hip band, sleeve, forearm, fist, thigh, shin with cuff, boot.
+
+## Ludo.ai (how its asset generator works, from its docs, changelog, MCP API listing and founder interview)
+- **No rigging in 2D:** sprite animation is image-to-video. "There's no rigging step. You go from a flat image
+  to animation frames directly" (ludo.ai/tools/sprite-animation). Results carry a `video_url`; frames are
+  sampled from it (4–64, at most ~16 fps), matted and packed into a sheet, priced per second of video (Hydra
+  3 credits/s).
+- **Models:** in-house names only (Hydra, Griffin, Forge...). The CTO "tests out all open-source models", so
+  the backends are likely open image-to-video models swapped as better ones ship (inference).
+- **Consistency:** first / middle / last keyframe conditioning, motion transfer from a reference video,
+  colour correction toward the keyframes ("not a guarantee").
+- **Skeletal path:** only in 3D: rig a generated 3D model, animate it, render directional sprites. No Spine or
+  2D parts export.
+- **For GGS:** their 2D quality comes from a strong image-to-video model plus keyframes. That is the same
+  family as One-to-All / Wan-Animate, run on server GPUs. GGS's rig-first parts and engine packages are
+  something Ludo does not offer.
