@@ -145,11 +145,11 @@ _STYLE = {
 }
 
 
-def _capsule(draw, p0, p1, width, fill, outline_px, start_cap=True, end_cap=True):
+def _capsule(draw, p0, p1, width, fill, outline_px, outline=OUTLINE, start_cap=True, end_cap=True):
     def cap(p, r, color):
         draw.ellipse([p[0] - r, p[1] - r, p[0] + r, p[1] + r], fill=color)
 
-    for w, color in ((width + 2 * outline_px, OUTLINE), (width, fill)):
+    for w, color in ((width + 2 * outline_px, outline), (width, fill)):
         draw.line([p0, p1], fill=color, width=max(1, round(w)))
         if start_cap:
             cap(p0, w / 2, color)
@@ -193,6 +193,29 @@ def _head(draw, pivot, d, length, s, variant, outline_px, skull: float = 1.0, ne
                   (c[0] + r * 0.9, c[1] + r * 0.22)], fill=SKIN, outline=OUTLINE)
 
 
+# "mannequin" look: a neutral, featureless figure for on-screen previews (the pose editor)
+M_LIMB = (204, 208, 216)
+M_TRUNK = (184, 189, 199)
+M_JOINT = (150, 156, 170)
+M_OUTLINE = (74, 80, 94)
+_M_JOINTED = {"upper_arm", "forearm", "hand", "thigh", "shin", "foot"}
+
+
+def _mannequin_head(draw, pivot, d, length, s, outline_px, skull: float = 1.0, neck: float = 1.0,
+                    front: bool = False) -> None:
+    """Neck + an egg-shaped featureless head; a small nose shows which way a side-view figure faces."""
+    neck_end = (pivot[0] + d[0] * length * 0.35, pivot[1] + d[1] * length * 0.35)
+    _capsule(draw, pivot, neck_end, 0.045 * s * neck, M_LIMB, outline_px, M_OUTLINE)
+    c = (pivot[0] + d[0] * length * 0.62, pivot[1] + d[1] * length * 0.62)
+    rx, ry = 0.068 * s * skull, 0.08 * s * skull
+    if not front:
+        draw.polygon([(c[0] + rx * 0.85, c[1] - ry * 0.05), (c[0] + rx * 1.12, c[1] + ry * 0.2),
+                      (c[0] + rx * 0.85, c[1] + ry * 0.28)], fill=M_LIMB, outline=M_OUTLINE)
+    o = outline_px
+    draw.ellipse([c[0] - rx - o, c[1] - ry - o, c[0] + rx + o, c[1] + ry + o], fill=M_OUTLINE)
+    draw.ellipse([c[0] - rx, c[1] - ry, c[0] + rx, c[1] + ry], fill=M_LIMB)
+
+
 def _front_face(draw, c, r, variant) -> None:
     draw.chord([c[0] - r, c[1] - r, c[0] + r, c[1] + r], 180, 360, fill=OUTLINE)  # hair on top
     draw.rectangle([c[0] - r, c[1] - 0.05 * r, c[0] + r, c[1] + 0.02 * r], fill=SKIN)
@@ -216,8 +239,12 @@ def _front_face(draw, c, r, variant) -> None:
 
 
 def make_programmer_art(rig: RigSpec, out_dir: str | Path, px_per_height: float = 600.0,
-                        name: str = "programmer_art", supersample: int = 4, body=None) -> Path:
+                        name: str = "programmer_art", supersample: int = 4, body=None,
+                        look: str = "cartoon") -> Path:
     """Draw a flat-colour placeholder part sheet for ``rig`` and write ``parts.png`` + ``character.yaml``.
+
+    ``look`` is "cartoon" (shirt, trousers, face) or "mannequin" (neutral grey, featureless, ball joints; for
+    on-screen previews only).
 
     Lengths are the rig's rest lengths, reshaped by ``body`` (a ``ggs.rig.body.BodyShape``) when given.
     The art has native alpha (drawn on a transparent canvas)."""
@@ -258,15 +285,23 @@ def make_programmer_art(rig: RigSpec, out_dir: str | Path, px_per_height: float 
         base = re.sub(r"_(l|r|near|far)$", "", part.name)
         fill, width = _STYLE.get(base, (SHIRT, 0.06))
         width *= widen * (FRONT_WIDTH.get(base, 1.0) if front else 1.0)
-        if part.name == "head":
+        line = OUTLINE
+        if look == "mannequin":
+            fill, line = (M_TRUNK if base in ("torso", "pelvis") else M_LIMB), M_OUTLINE
+        if part.name == "head" and look == "mannequin":
+            _mannequin_head(draw, pivot, (dx, dy), length, s, outline_px, skull=skull, neck=widen, front=front)
+        elif part.name == "head":
             _head(draw, pivot, (dx, dy), length, s, variant, outline_px, skull=skull, neck=widen, front=front)
         elif part.name == "torso":  # flat hem at the hips (the pelvis covers it); keeps the cell edge clear
             # front view: square shoulders (a round top reads as a hood behind the head)
-            _capsule(draw, pivot, end, width * s, fill, outline_px, start_cap=False, end_cap=not front)
+            _capsule(draw, pivot, end, width * s, fill, outline_px, line, start_cap=False, end_cap=not front)
         elif base == "foot" and not front:
-            _capsule(draw, (pivot[0] - 0.02 * s, pivot[1]), end, width * s, fill, outline_px)
+            _capsule(draw, (pivot[0] - 0.02 * s, pivot[1]), end, width * s, fill, outline_px, line)
         else:
-            _capsule(draw, pivot, end, width * s, fill, outline_px)
+            _capsule(draw, pivot, end, width * s, fill, outline_px, line)
+        if look == "mannequin" and base in _M_JOINTED:
+            r = width * s * 0.3
+            draw.ellipse([pivot[0] - r, pivot[1] - r, pivot[0] + r, pivot[1] + r], fill=M_JOINT)
         big.alpha_composite(layer, (cell_xy[0] * cell * k, cell_xy[1] * cell * k))
         if not (0 <= end[0] <= cell * k and 0 <= end[1] <= cell * k) or not math.isfinite(end[0]):
             raise ValueError(f"part {part.name!r} does not fit its cell at {px_per_height} px per height")

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ggs.ui.icons import set_icon
 from ggs.ui.widgets import PathPicker, checker_pixmap
 from ggs.ui.wizard import tile
 
@@ -84,7 +85,7 @@ class ProjectCard(QFrame):
         else:
             from ggs.ui.icons import pixmap
 
-            thumb.setPixmap(pixmap("assets", 96))
+            thumb.setPixmap(pixmap("projects", 48, "muted"))
         lay.addWidget(thumb, 1)
         meta = yaml.safe_load((project / ".ggs" / "project.yaml").read_text(encoding="utf-8")) or {}
         name = QLabel(meta.get("name") or project.name)
@@ -94,11 +95,10 @@ class ProjectCard(QFrame):
         sub.setObjectName("muted")
         row = QHBoxLayout()
         row.addWidget(sub, 1)
-        from ggs.ui.errors import trash_icon
 
         rm = QPushButton()
         rm.setObjectName("flat")
-        rm.setIcon(trash_icon(self))
+        set_icon(rm, "delete")
         rm.setToolTip("Delete this project, or take it off this list")
         rm.setCursor(Qt.CursorShape.ArrowCursor)
         rm.clicked.connect(lambda: self.delete.emit(project))
@@ -149,6 +149,7 @@ class NewProjectDialog(QDialog):
         cancel.clicked.connect(self.reject)
         ok = QPushButton("Create")
         ok.setObjectName("primary")
+        set_icon(ok, "confirm")
         ok.clicked.connect(self._ok)
         btns.addWidget(cancel)
         btns.addWidget(ok)
@@ -212,6 +213,7 @@ class StartScreen(QWidget):
         lay.addWidget(scroll, 1)
         other = QPushButton("Open Folder...")
         other.setObjectName("flat")
+        set_icon(other, "open")
         other.clicked.connect(self._open_folder)
         lay.addWidget(other, 0, Qt.AlignmentFlag.AlignLeft)
         self.refresh()

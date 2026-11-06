@@ -28,8 +28,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ggs.ui.icons import set_icon
+
 PREVIEW_HEIGHT = 360  # px per standing height in the editor
-LEAD_IN = 0.4  # seconds from the drawing's pose into an animation (warp)
 HANDLE = 7
 
 
@@ -182,7 +183,7 @@ class Canvas(QWidget):
         return best
 
     def paintEvent(self, _e) -> None:
-        from ggs.ui.theme import ACCENT, MUTED, NOTICE
+        from ggs.ui.theme import ACCENT, INK, MUTED, NOTICE
 
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -195,14 +196,15 @@ class Canvas(QWidget):
         k, o = self._fit()
         p.drawImage(QRectF(o.x(), o.y(), self.image.width() * k, self.image.height() * k), self.image)
         if self.show_bones:
-            pen = QPen(QColor(ACCENT), 2)
-            p.setPen(pen)
+            line = QColor(INK)
+            line.setAlpha(170)
+            p.setPen(QPen(line, 2))
             for s, e in self.bones.values():
                 p.drawLine(QPointF(o.x() + s.x() * k, o.y() + s.y() * k), QPointF(o.x() + e.x() * k, o.y() + e.y() * k))
             for key, h in self.handles.items():
                 pt = self.drag_pos if key == self.drag and self.drag_pos is not None else h
                 q = QPointF(o.x() + pt.x() * k, o.y() + pt.y() * k)
-                p.setPen(QPen(QColor("#ffffff"), 2))
+                p.setPen(QPen(QColor(INK), 1.5))
                 p.setBrush(QColor(NOTICE if key == self.drag else ACCENT))
                 p.drawEllipse(q, HANDLE, HANDLE)
         if self.text:
@@ -269,22 +271,18 @@ class AnimEditor(QWidget):
         top.addStretch(1)
         self.confirm = QPushButton("Confirm Joints")
         self.confirm.setObjectName("primary")
+        set_icon(self.confirm, "confirm")
         self.confirm.setToolTip("Use these joint positions and continue to the animations")
         self.confirm.clicked.connect(self._confirm)
         top.addWidget(self.confirm)
-        self.lead = QPushButton("Lead-in")
-        self.lead.setCheckable(True)
-        self.lead.setChecked(True)
-        self.lead.setToolTip("Start from the drawing's pose and blend into the animation")
-        self.lead.toggled.connect(lambda _on: self.clip is not None and self.set_clip(self.base_clip, self.clip_name,
-                                                                                      self.save_dir))
-        top.addWidget(self.lead)
         self.bones_btn = QPushButton("Skeleton")
         self.bones_btn.setCheckable(True)
+        set_icon(self.bones_btn, "skeleton")
         self.bones_btn.setChecked(True)
         self.bones_btn.toggled.connect(self._toggle_bones)
         top.addWidget(self.bones_btn)
         self.undo = QPushButton("Reset Edits")
+        set_icon(self.undo, "revert")
         self.undo.setToolTip("Discard the touch-ups of this animation")
         self.undo.clicked.connect(self._undo)
         top.addWidget(self.undo)
@@ -295,6 +293,7 @@ class AnimEditor(QWidget):
         row = QHBoxLayout()
         self.play = QPushButton("Play")
         self.play.setCheckable(True)
+        set_icon(self.play, "play")
         self.play.toggled.connect(self._play)
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.valueChanged.connect(self._seek)
@@ -314,7 +313,6 @@ class AnimEditor(QWidget):
         self.renderer = renderer
         editable = bool(renderer and renderer.joints_editable)
         self.modes.button(1).setVisible(editable)
-        self.lead.setVisible(editable)
         if not editable:
             self.modes.button(0).setChecked(True)
         elif not getattr(renderer.skin, "confirmed", False):  # joints first: check them before animating
@@ -329,12 +327,6 @@ class AnimEditor(QWidget):
         self.lead_n = 0
         if self.renderer is not None and clip is not None:
             clip = self.renderer.prepare(clip)  # tracks for the layout's extra bones
-            if self.renderer.joints_editable and self.lead.isChecked():
-                from ggs.rig.layout import with_lead_in
-
-                n0 = clip.frame_count
-                clip = with_lead_in(clip, self.renderer.skin.rest_angles(), LEAD_IN)
-                self.lead_n = clip.frame_count - n0
         self.clip, self.clip_name, self.save_dir = clip, name, save_dir
         self.cache.clear()
         if self.renderer is not None and clip is not None:
@@ -401,6 +393,7 @@ class AnimEditor(QWidget):
 
     def _play(self, on: bool) -> None:
         self.play.setText("Pause" if on else "Play")
+        set_icon(self.play, "pause" if on else "play")
         self.timer.start() if on and self.clip is not None else self.timer.stop()
 
     def _tick(self) -> None:

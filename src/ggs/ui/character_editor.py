@@ -25,8 +25,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ggs.ui.icons import icon
-from ggs.ui.theme import ACCENT
+from ggs.ui.icons import icon, set_icon
+from ggs.ui.theme import ACCENT, INK, NOTICE
 
 # (BodyShape field, label); the four limb segments have their own sliders
 SLIDERS = [("head", "Head"), ("torso", "Body"), ("upper_arm", "Upper arm"), ("forearm", "Forearm"),
@@ -48,7 +48,7 @@ def _puppet(view: str, body_json: str):
     from ggs.rig.body import BodyShape
     from ggs.rig.make import guide_puppet
 
-    return guide_puppet(_rig(view), BodyShape(**json.loads(body_json)))
+    return guide_puppet(_rig(view), BodyShape(**json.loads(body_json)), look="mannequin")
 
 
 def _small_tile(text: str) -> QPushButton:
@@ -89,8 +89,8 @@ class FigureView(QLabel):
         for name, (_, (ex, ey)) in guide.spec.joints.items():
             if self._draggable(name):
                 on = name in (self.drag, self.hover)
-                p.setPen(QPen(QColor("#ffffff"), 2))
-                p.setBrush(QColor(ACCENT if not on else "#f0a040"))
+                p.setPen(QPen(QColor(INK), 1.5))
+                p.setBrush(QColor(ACCENT if not on else NOTICE))
                 p.drawEllipse(QPointF(ex * k, ey * k), 6 if on else 4.5, 6 if on else 4.5)
         p.end()
         self.setPixmap(pm)
@@ -156,9 +156,8 @@ class _Section(QWidget):
         row.setContentsMargins(0, 6, 0, 0)
         lab = QLabel(title)
         lab.setStyleSheet("font-weight: 600;")
-        self.save = QPushButton(f"Save this {title.lower()}")
-        self.save.setIcon(icon("save"))
-        self.save.setObjectName("notice")
+        self.save = QPushButton(f"Save {title}")
+        set_icon(self.save, "save")
         self.save.setToolTip(f"You changed the {title.lower()}: save it to reuse it later")
         self.save.clicked.connect(lambda: on_save())
         self.save.setVisible(False)

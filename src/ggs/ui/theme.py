@@ -1,6 +1,9 @@
 """Look of the app: one dark theme, rounded cards, one accent colour."""
 
-ACCENT = "#7c8cff"
+ACCENT = "#FFEA00"
+ACCENT_HOVER = "#FFF14D"
+SELECTED = "#3a361a"
+INK = "#16171c"  # lines and outlines drawn over white canvases (skeletons, handles)
 BG = "#1b1c21"
 PANEL = "#23252c"
 CARD = "#2b2e36"
@@ -24,7 +27,8 @@ QLabel#chip {{ background: {CARD}; border: 1px solid {LINE}; border-radius: 9px;
 QPushButton {{ background: {CARD}; border: 1px solid {LINE}; border-radius: 8px; padding: 6px 12px; }}
 QPushButton:hover {{ border-color: {ACCENT}; }}
 QPushButton:disabled {{ color: {MUTED}; border-color: {CARD}; }}
-QPushButton#primary {{ background: {ACCENT}; border: none; color: #10121a; font-weight: 600; }}
+QPushButton#primary {{ background: {ACCENT}; border: none; color: #16171c; font-weight: 600; }}
+QPushButton#primary:hover {{ background: {ACCENT_HOVER}; }}
 QPushButton#primary:disabled {{ background: {LINE}; color: {MUTED}; }}
 QPushButton#notice {{ background: {NOTICE}; border: none; color: #1b1c21; font-weight: 600; }}
 QPushButton#notice:hover {{ background: #ffb85c; }}
@@ -35,7 +39,11 @@ QPushButton#tab:disabled {{ color: {LINE}; }}
 QPushButton#flat {{ background: transparent; border: none; color: {MUTED}; }}
 QPushButton#flat:hover {{ color: {TEXT}; }}
 QPushButton#tile {{ background: {CARD}; border: 2px solid {LINE}; border-radius: 12px; padding: 10px; }}
-QPushButton#tile:checked {{ border-color: {ACCENT}; background: #313552; }}
+QPushButton#tile:checked {{ border-color: {ACCENT}; background: {SELECTED}; }}
+QToolButton {{ background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 4px; }}
+QToolButton:hover {{ background: {CARD}; border-color: {LINE}; }}
+QToolButton:checked {{ background: {SELECTED}; border-color: {ACCENT}; }}
+QToolButton[popupMode="2"] {{ padding-right: 14px; }}
 QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
     background: {CARD}; border: 1px solid {LINE}; border-radius: 8px; padding: 5px 8px;
     selection-background-color: {ACCENT}; }}
@@ -43,7 +51,7 @@ QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {{ border-color: {ACCENT}
 QComboBox::drop-down {{ border: none; width: 18px; }}
 QTreeWidget, QListWidget {{ background: {PANEL}; border: none; border-radius: 10px; padding: 4px; outline: 0; }}
 QTreeWidget::item, QListWidget::item {{ padding: 4px 2px; border-radius: 6px; }}
-QTreeWidget::item:selected, QListWidget::item:selected {{ background: #313552; color: {TEXT}; }}
+QTreeWidget::item:selected, QListWidget::item:selected {{ background: {SELECTED}; color: {TEXT}; }}
 QTreeWidget::item:hover, QListWidget::item:hover {{ background: #2a2d38; }}
 QProgressBar {{ background: {CARD}; border: none; border-radius: 3px; height: 6px; max-height: 6px; }}
 QProgressBar::chunk {{ background: {ACCENT}; border-radius: 3px; }}
@@ -56,6 +64,6 @@ QCheckBox::indicator {{ width: 16px; height: 16px; }}
 QTabWidget::pane {{ border: none; top: 4px; }}
 QTabBar::tab {{ background: {CARD}; border: 1px solid {LINE}; border-radius: 8px; padding: 6px 14px;
     margin-right: 6px; color: {MUTED}; }}
-QTabBar::tab:selected {{ background: #313552; border-color: {ACCENT}; color: {TEXT}; }}
+QTabBar::tab:selected {{ background: {SELECTED}; border-color: {ACCENT}; color: {TEXT}; }}
 QTabBar::tab:hover {{ color: {TEXT}; }}
 """

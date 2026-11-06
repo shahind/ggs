@@ -205,8 +205,6 @@ def character_slice(project: Path, item: str, template: str = "side_simple", lay
     return a
 
 
-def export_lead_in(cmd: list[str], seconds: float) -> list[str]:
-    return [*cmd, "--lead-in", str(seconds)] if seconds else cmd
 
 
 def character_warp(project: Path, item: str, detail: str = "normal") -> list[str]:

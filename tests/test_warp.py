@@ -197,3 +197,25 @@ def test_moving_a_joint_rebuilds_the_rig(tmp_path):
     assert after["forearm_near"][0] == pytest.approx([elbow[0] + 5, elbow[1] + 3])
     assert after["upper_arm_near"][1] == pytest.approx(after["forearm_near"][0])  # the upper arm ends there too
     assert rebuilt.layers
+
+
+def test_limbs_bend_only_at_joints_and_stray_bits_join_their_surroundings(rig, guide):
+    from ggs.rig.skin import build_skin, tidy_labels
+
+    widths = bone_widths(guide.labels, rig, guide.spec.joints)
+    skin = build_skin(rig, guide.image, guide.spec.joints, widths, guide.spec.height_px)
+    names = [b.name for b in rig.bones]
+    arm = next(L for L in skin.layers if L.name == "upper_arm_near")
+    # a vertex in the middle of the forearm follows the forearm alone; at the elbow it is shared half and half
+    (sx, sy), (ex, ey) = guide.spec.joints["forearm_near"]
+    mid = np.argmin(np.hypot(arm.verts[:, 0] - (sx + ex) / 2, arm.verts[:, 1] - (sy + ey) / 2))
+    assert arm.weights[mid, names.index("forearm_near")] > 0.99
+    elbow = np.argmin(np.hypot(arm.verts[:, 0] - sx, arm.verts[:, 1] - sy))
+    assert 0.2 < arm.weights[elbow, names.index("upper_arm_near")] < 0.8
+    assert np.allclose(arm.weights.sum(1), 1.0, atol=1e-4)
+    # a few pixels of the face labelled as the near thigh go to the head
+    lab = skin.labels.copy()
+    hx, hy = (np.array(guide.spec.joints["head"][0]) + 2 * np.array(guide.spec.joints["head"][1])) / 3
+    lab[int(hy) - 1:int(hy) + 2, int(hx) - 1:int(hx) + 2] = names.index("thigh_near")
+    out = tidy_labels(lab, rig, guide.spec.joints, widths)
+    assert out[int(hy), int(hx)] == names.index("head")

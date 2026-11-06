@@ -23,16 +23,15 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QSpinBox,
-    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from ggs.ui import commands as C
-from ggs.ui.icons import icon, pixmap
+from ggs.ui.icons import pixmap, set_icon
 from ggs.ui.jobs import Job, JobQueue, run_on_stage
 from ggs.ui.kinds import SIZE_LABELS, kind
-from ggs.ui.widgets import ImageStage, PromptEdit
+from ggs.ui.widgets import CurrentStack, ImageStage, PromptEdit
 
 
 class Advanced(QFrame):
@@ -85,7 +84,7 @@ class Placeholder(QWidget):
 def _flat(text: str, tip: str = "", ic: str | None = None) -> QPushButton:
     b = QPushButton(text)
     if ic:
-        b.setIcon(icon(ic))
+        set_icon(b, ic)
     b.setToolTip(tip)
     return b
 
@@ -109,10 +108,9 @@ class DrawPanel(QWidget):
         self.next.clicked.connect(lambda: ws.step(1))
         self.regen = _flat("Regenerate", "Same description, new seed", "regenerate")
         self.regen.clicked.connect(lambda: ws.run("regenerate"))
-        from ggs.ui.errors import trash_icon
 
         self.delete = _flat("", "Delete this drawing from the history")
-        self.delete.setIcon(trash_icon(self))
+        set_icon(self.delete, "delete")
         self.delete.clicked.connect(ws.delete_drawing)
         row.addWidget(self.prev)
         row.addWidget(self.where)
@@ -135,11 +133,12 @@ class DrawPanel(QWidget):
         box.addWidget(self.input, 1)
         col = QVBoxLayout()
         self.change = QPushButton("Refine")
-        self.change.setIcon(icon("send"))
         self.change.setObjectName("primary")
+        set_icon(self.change, "refine")
         self.change.setToolTip("Edit the drawing on screen: type what to change, e.g. 'make the hat blue'")
         self.change.clicked.connect(self._change)
         self.new = QPushButton("Generate")
+        set_icon(self.new, "generate")
         self.new.setToolTip("Start over: a new drawing from the words in the box")
         self.new.clicked.connect(self._new)
         col.addWidget(self.change)
@@ -205,18 +204,17 @@ class ItemWorkspace(QWidget):
         self.size_box = QHBoxLayout()
         row2.addLayout(self.size_box)
         self.export_btn = QPushButton("Export")
-        self.export_btn.setIcon(icon("export"))
+        set_icon(self.export_btn, "export")
         self.export_btn.clicked.connect(self._export)
         row2.addWidget(self.export_btn)
-        from ggs.ui.errors import trash_icon
 
         self.delete_btn = QPushButton()
-        self.delete_btn.setIcon(trash_icon(self))
+        set_icon(self.delete_btn, "delete")
         self.delete_btn.setObjectName("flat")
         self.delete_btn.clicked.connect(lambda: self.delete_requested.emit(self.dir))
         head.addWidget(self.delete_btn)
         adv = QPushButton("Advanced")
-        adv.setIcon(icon("advanced"))
+        set_icon(adv, "advanced")
         adv.setObjectName("flat")
         adv.setCheckable(True)
         adv.toggled.connect(self.adv.setVisible)
@@ -224,7 +222,7 @@ class ItemWorkspace(QWidget):
         self.adv_btn = adv
         main.addLayout(head)
         main.addLayout(row2)
-        self.pages = QStackedWidget()
+        self.pages = CurrentStack()
         main.addWidget(self.pages, 1)
         self.draw = DrawPanel(self)
         self.pages.addWidget(self.draw)
@@ -277,6 +275,7 @@ class ItemWorkspace(QWidget):
         d.change.setVisible(has)
         d.new.setText("Generate")
         d.new.setObjectName("" if has else "primary")
+        set_icon(d.new, "generate")
         d.new.style().unpolish(d.new)
         d.new.style().polish(d.new)
         d.input.setPlaceholderText("Description, or a change to refine" if has else "Description")
@@ -414,16 +413,18 @@ class CharacterWorkspace(ItemWorkspace):
         self.pages.addWidget(self.animate)
         # "Use this design" and what opens after it
         self.accept_btn = QPushButton("Accept Design")
-        self.accept_btn.setObjectName("notice")
+        self.accept_btn.setObjectName("primary")
+        set_icon(self.accept_btn, "accept")
         self.accept_btn.setToolTip("Keep this drawing as the character. Then you can make its sliced version, "
                                    "animate it and export it.")
         self.accept_btn.clicked.connect(self._accept)
         self.kept = QLabel("Accepted Design")
         self.kept.setStyleSheet("color: #3fb27f; font-weight: 600;")
         self.go_sliced = QPushButton("Sliced Version")
+        set_icon(self.go_sliced, "layout")
         self.go_sliced.clicked.connect(lambda: self.show_tab(1))
         self.go_anim = QPushButton("Animate")
-        self.go_anim.setIcon(icon("animations"))
+        set_icon(self.go_anim, "animations")
         self.go_anim.clicked.connect(lambda: self.show_tab(2))
         for w in (self.accept_btn, self.kept, self.go_sliced, self.go_anim):
             self.draw.extra.addWidget(w)

@@ -10,13 +10,14 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QStackedWidget
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 
 from ggs import __version__
 from ggs.ui import commands as C
 from ggs.ui.jobs import Job, JobQueue
 from ggs.ui.start import NewProjectDialog, StartScreen, remember
 from ggs.ui.theme import QSS
+from ggs.ui.widgets import CurrentStack
 
 
 class MainWindow(QMainWindow):
@@ -26,7 +27,7 @@ class MainWindow(QMainWindow):
         self.resize(1320, 860)
         self.settings = settings or QSettings("GGS", "GameGraphicStudio")
         self.queue = JobQueue(self)
-        self.stack = QStackedWidget()
+        self.stack = CurrentStack()
         self.setCentralWidget(self.stack)
         self.start = StartScreen(self.settings)
         self.start.open_project.connect(self.open_project)
@@ -124,7 +125,7 @@ def main(argv: list[str] | None = None) -> int:
     app.setStyleSheet(QSS)
     from ggs.ui.icons import icon
 
-    app.setWindowIcon(icon("assets"))
+    app.setWindowIcon(icon("app"))
     win = MainWindow(project)
     win.show()
     if "--no-setup" not in argv:

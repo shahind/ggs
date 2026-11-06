@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QSplitter,
-    QStackedWidget,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -22,10 +21,10 @@ from PySide6.QtWidgets import (
 )
 
 from ggs.ui import commands as C
-from ggs.ui.icons import icon
+from ggs.ui.icons import padded, set_icon
 from ggs.ui.jobs import Job, JobQueue
 from ggs.ui.kinds import kind
-from ggs.ui.widgets import checker_pixmap
+from ggs.ui.widgets import CurrentStack, checker_pixmap
 from ggs.ui.workspace import CharacterWorkspace, ItemWorkspace, Placeholder
 
 MODEL_LABELS = {"flux2-klein-4b": "FLUX.2 klein - best quality", "sdxl": "SDXL - faster style training"}
@@ -61,7 +60,7 @@ class ProjectView(QWidget):
 
         top = QHBoxLayout()
         home = QPushButton("Projects")
-        home.setIcon(icon("projects"))
+        set_icon(home, "projects")
         home.setObjectName("flat")
         home.clicked.connect(self.back.emit)
         self.name = QLabel()
@@ -76,8 +75,7 @@ class ProjectView(QWidget):
         self.model.currentIndexChanged.connect(self._model_changed)
         top.addWidget(self.model)
         settings = QPushButton()
-        settings.setIcon(icon("settings"))
-        settings.setIconSize(QSize(22, 22))
+        set_icon(settings, "settings")
         settings.setToolTip("Settings")
         settings.setObjectName("flat")
         settings.clicked.connect(self._settings)
@@ -90,9 +88,8 @@ class ProjectView(QWidget):
         left.setMinimumWidth(190)
         lv = QVBoxLayout(left)
         new = QPushButton("New...")
-        new.setIcon(icon("new"))
-        new.setIconSize(QSize(22, 22))
         new.setObjectName("primary")
+        set_icon(new, "new")
         new.clicked.connect(lambda: self.new_item())
         lv.addWidget(new)
         self.tree = QTreeWidget()
@@ -105,7 +102,7 @@ class ProjectView(QWidget):
                   context=Qt.ShortcutContext.WidgetShortcut)
         lv.addWidget(self.tree, 1)
         split.addWidget(left)
-        self.stack = QStackedWidget()
+        self.stack = CurrentStack()
         split.addWidget(self.stack)
         split.setSizes([260, 1000])
         lay.addWidget(split, 1)
@@ -132,7 +129,7 @@ class ProjectView(QWidget):
         for key, label in (("characters", "Characters"), ("assets", "Assets"), ("animations", "Animations"),
                            ("styles", "Styles")):
             node = QTreeWidgetItem(self.tree, [label])
-            node.setIcon(0, icon(key))
+            node.setIcon(0, padded(key, 28))
             node.setData(0, ROLE_NODE, key)
             sections[key] = node
         chars, assets, anims, styles = (sections[k] for k in ("characters", "assets", "animations", "styles"))
@@ -160,7 +157,7 @@ class ProjectView(QWidget):
                 continue
             if k.id not in groups:
                 groups[k.id] = QTreeWidgetItem(assets, [k.label])
-                groups[k.id].setIcon(0, icon(k.icon))
+                groups[k.id].setIcon(0, padded(k.icon, 28))
                 groups[k.id].setData(0, ROLE_NODE, "group")
             it = QTreeWidgetItem(groups[k.id], [rec.name])
             it.setData(0, ROLE_DIR, str(d))

@@ -121,3 +121,22 @@ downloads are about 6–8 GB (SD 1.5, motion adapter, OpenPose ControlNet, IP-Ad
     Pixelorama, LibreSprite, Paint.NET), reloaded when saved there.
   - Generated Frames previews the skeleton animation at the chosen frame count.
   - Enterprise-style wording, with explanations in tooltips.
+
+## Fourth review (2026-11-05, evening)
+- **Warp:**
+  - The lead-in is gone. Animations play from their own first frame.
+  - The confirmed joints are the pose everything bends from. Each vertex now follows its nearest bone rigidly
+    and blends with the next bone only near their joint: a short zone at elbows, knees, wrists, ankles, waist and
+    neck, almost none at shoulders and hips. Sleeves, boots and hands keep their shape instead of twisting.
+  - **Shoulder bug:** the head's width comes from the hat, so the head owned both shoulders and the top of the
+    far sleeve, and they stayed on the body when the arms moved. At neck level the head now keeps only the neck.
+    Trunk pixels outside the trunk that an arm explains better go to the arm.
+  - Small islands of a layer (a bit of the far hand labelled as the near leg) go to what surrounds them.
+  - The area under an arm is filled with the trunk's own colour, inside the trunk's outline, never from the
+    hat-wide head.
+- **UI:**
+  - Lucide line icons (ISC) replace the generated icons, tinted for the theme, with one size on every button.
+    New app logo.
+  - The accent is #FFEA00.
+  - The Body & Pose preview shows a neutral grey mannequin. The pose guide the model sees is unchanged.
+  - A hidden tab no longer widens the window: the pieces editor's toolbar forced 1872 px.

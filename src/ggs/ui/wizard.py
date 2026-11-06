@@ -48,7 +48,7 @@ class NewItemDialog(QDialog):
         for i, k in enumerate(KINDS):
             b = tile(k.label, "", 200, 64)
             b.setIcon(icon(k.icon))
-            b.setIconSize(QSize(36, 36))
+            b.setIconSize(QSize(28, 28))
             b.setToolTip(k.hint)
             b.setProperty("kind", k.id)
             self.kinds.addButton(b)

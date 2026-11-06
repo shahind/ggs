@@ -28,14 +28,14 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QSpinBox,
-    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from ggs.ui import commands as C
+from ggs.ui.icons import set_icon
 from ggs.ui.jobs import Job, run_on_stage
-from ggs.ui.widgets import ImageStage
+from ggs.ui.widgets import CurrentStack, ImageStage
 
 ROW = 256
 ENGINE_FORMATS = [("Godot", "godot"), ("Unity", "unity"), ("Defold", "defold"), ("Parts + JSON", "rig")]
@@ -365,7 +365,6 @@ class SlicedTab(QWidget):
         super().__init__()
         from PySide6.QtWidgets import QCheckBox, QFormLayout, QGroupBox
 
-        from ggs.ui.errors import trash_icon
         from ggs.ui.paint import ImageEditor
 
         self.ws = ws
@@ -388,10 +387,12 @@ class SlicedTab(QWidget):
         left.addWidget(box)
         self.make = QPushButton("Generate")
         self.make.setObjectName("primary")
+        set_icon(self.make, "generate")
         self.make.setToolTip("Draw the character in the layout's pose and cut it into pieces")
         self.make.clicked.connect(self._make)
         left.addWidget(self.make)
         self.apply = QPushButton("Apply Layout")
+        set_icon(self.apply, "layout")
         self.apply.setToolTip("Cut the existing drawings again with this layout (no new drawing)")
         self.apply.clicked.connect(self._apply)
         left.addWidget(self.apply)
@@ -407,6 +408,7 @@ class SlicedTab(QWidget):
         ef.addRow("Format", self.fmt)
         ef.addRow("Height", self.height)
         self.export = QPushButton("Export...")
+        set_icon(self.export, "export")
         self.export.clicked.connect(self._export)
         ef.addRow(self.export)
         left.addWidget(exp)
@@ -414,7 +416,7 @@ class SlicedTab(QWidget):
         self.status = _muted("")
         left.addWidget(self.status)
         self.delete = QPushButton("Delete")
-        self.delete.setIcon(trash_icon(self))
+        set_icon(self.delete, "delete")
         self.delete.setToolTip("Delete the sliced version")
         self.delete.clicked.connect(self._delete)
         left.addWidget(self.delete)
@@ -422,7 +424,7 @@ class SlicedTab(QWidget):
         wrap.setLayout(left)
         wrap.setFixedWidth(300)
         lay.addWidget(wrap)
-        self.right = QStackedWidget()
+        self.right = CurrentStack()
         self.stage = ImageStage(empty="No sliced version")
         self.editor = ImageEditor()
         self.editor.saved.connect(self._pieces_saved)
@@ -567,7 +569,7 @@ class AnimateTab(QWidget):
         self.methods.button(0).setChecked(True)
         self.methods.idClicked.connect(self._method)
         lay.addLayout(row)
-        self.stack = QStackedWidget()
+        self.stack = CurrentStack()
         self.warp = CutoutPanel(self, warp=True)
         self.cutout = CutoutPanel(self)
         self.drawn = DrawnPanel(self)
@@ -609,6 +611,7 @@ class CutoutPanel(QWidget):
         self.detail.setVisible(warp)
         self.go = QPushButton("Create Rig" if warp else "Sliced Version")
         self.go.setObjectName("primary")
+        set_icon(self.go, "rig")
         self.go.clicked.connect(self._make_warp if warp else (lambda: self.ws.show_tab(1)))
         nrow.addWidget(self.detail)
         nrow.addWidget(self.go)
@@ -628,10 +631,12 @@ class CutoutPanel(QWidget):
         left.addWidget(self.list, 1)
         if warp:
             remake = QPushButton("Rebuild Rig")
+            set_icon(remake, "regenerate")
             remake.setToolTip("Find the joints again and lay a new mesh (after a new design, or another mesh size)")
             remake.clicked.connect(self._make_warp)
             left.addWidget(self.detail_again(remake))
             touch = QPushButton("Edit Picture...")
+            set_icon(touch, "brush")
             touch.setToolTip("Paint over the drawing that is bent (brush, eraser, colour picker, fill)")
             touch.clicked.connect(self._touch_up)
             left.addWidget(touch)
@@ -656,6 +661,7 @@ class CutoutPanel(QWidget):
         right.addLayout(row)
         self.export = QPushButton("Export Selected...")
         self.export.setObjectName("primary")
+        set_icon(self.export, "export")
         self.export.clicked.connect(self._export)
         right.addWidget(self.export)
         lay.addLayout(right, 3)
@@ -810,10 +816,6 @@ class CutoutPanel(QWidget):
                 out = base / f"{clips[0].stem}{ext}"
             cmd = C.export_many(clips, ch, fmt, out, height=self.height.value(),
                                 matte="#FFFFFF" if fmt == "gif" else None)
-            if self.warp and self.editor.lead.isChecked():
-                from ggs.ui.anim_editor import LEAD_IN
-
-                cmd = C.export_lead_in(cmd, LEAD_IN)
             job = Job(f"export {self.ws.rec.name}", [cmd])
 
             def done(ok: bool) -> None:
@@ -875,14 +877,15 @@ class DrawnPanel(QWidget):
         row = QHBoxLayout()
         self.draw = QPushButton("Generate Frames")
         self.draw.setObjectName("primary")
+        set_icon(self.draw, "generate")
         self.draw.clicked.connect(self._draw)
         self.open = QPushButton("Open Folder")
+        set_icon(self.open, "open")
         self.open.clicked.connect(self._open)
         self.open.setEnabled(False)
-        from ggs.ui.errors import trash_icon
 
         self.delete = QPushButton("Delete")
-        self.delete.setIcon(trash_icon(self))
+        set_icon(self.delete, "delete")
         self.delete.setToolTip("Delete these drawn frames")
         self.delete.clicked.connect(self._delete)
         self.delete.setEnabled(False)

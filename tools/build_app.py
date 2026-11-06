@@ -119,11 +119,27 @@ def bundle_models(dest: Path) -> None:
 
 
 def make_icon(out: Path) -> None:
-    from PIL import Image
+    """The app logo (src/ggs/ui/icons/app.svg) as a Windows .ico, rendered with Qt's SVG renderer."""
+    import io
 
-    src = ROOT / "src" / "ggs" / "ui" / "icons" / "assets@2x.png"
-    img = Image.open(src).convert("RGBA")
-    img.save(out, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128)])
+    from PIL import Image
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice, Qt
+    from PySide6.QtGui import QGuiApplication, QImage, QPainter
+    from PySide6.QtSvg import QSvgRenderer
+
+    _app = QGuiApplication.instance() or QGuiApplication([])
+    svg = QSvgRenderer(QByteArray((ROOT / "src" / "ggs" / "ui" / "icons" / "app.svg").read_bytes()))
+    img = QImage(256, 256, QImage.Format.Format_ARGB32)
+    img.fill(Qt.GlobalColor.transparent)
+    p = QPainter(img)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    svg.render(p)
+    p.end()
+    buf = QBuffer()
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    img.save(buf, "PNG")
+    pil = Image.open(io.BytesIO(bytes(buf.data()))).convert("RGBA")
+    pil.save(out, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
 
 
 def build(dist: Path, skip_site: bool = False) -> Path:

@@ -48,7 +48,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "ggs.export.engines" = ["*.txt"]
-"ggs.ui.icons" = ["*.png", "*.json"]
+"ggs.ui.icons" = ["*.svg", "*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

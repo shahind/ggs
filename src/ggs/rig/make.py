@@ -93,13 +93,14 @@ def draw_character(guide, description: str, *, view: str, body=None, seeds: list
     return out
 
 
-def guide_puppet(rig: RigSpec, body=None):
-    """The programmer-art puppet (drawn on the fly, in ``body``'s proportions) and its bone lengths."""
+def guide_puppet(rig: RigSpec, body=None, look: str = "cartoon"):
+    """The programmer-art puppet (drawn on the fly, in ``body``'s proportions) and its bone lengths. ``look`` is
+    "cartoon" or "mannequin" (previews)."""
     from ggs.rig.character import load_character, make_programmer_art
 
     with tempfile.TemporaryDirectory() as tmp:
         # drawn small enough that any body shape fits the cells; the guide render scales it up
-        ch = load_character(make_programmer_art(rig, tmp, px_per_height=460, body=body))
+        ch = load_character(make_programmer_art(rig, tmp, px_per_height=460, body=body, look=look))
         return ch.puppet(rig), dict(ch.spec.bone_lengths)
 
 

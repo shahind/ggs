@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from ggs.ui import commands as C
+from ggs.ui.icons import set_icon
 from ggs.ui.jobs import Job, JobQueue
 
 ROLE = 256
@@ -143,8 +144,10 @@ class LibraryTab(QWidget):
         self.preview = Preview()
         add = QPushButton("Add to Project")
         add.setObjectName("primary")
+        set_icon(add, "new")
         add.clicked.connect(self._add)
         self.take = QPushButton("New Take...")
+        set_icon(self.take, "generate")
         self.take.setToolTip("Make another version of this motion with the motion model")
         self.take.clicked.connect(self._new_take)
         self.preview.buttons.addWidget(add)
@@ -282,8 +285,10 @@ class DescribeTab(QWidget):
         btns = QHBoxLayout()
         self.go = QPushButton("Generate")
         self.go.setObjectName("primary")
+        set_icon(self.go, "generate")
         self.go.clicked.connect(self._run)
         self.models = QPushButton("Download Models...")
+        set_icon(self.models, "download")
         self.models.clicked.connect(self._setup)
         btns.addWidget(self.go)
         btns.addWidget(self.models)
@@ -382,10 +387,9 @@ class ProjectTab(QWidget):
         self.list.currentItemChanged.connect(self._pick)
         lay.addWidget(self.list, 3)
         self.preview = Preview()
-        from ggs.ui.errors import trash_icon
 
         rm = QPushButton("Delete")
-        rm.setIcon(trash_icon(self))
+        set_icon(rm, "delete")
         rm.clicked.connect(self._remove)
         self.preview.buttons.addWidget(rm)
         hint = QLabel("")

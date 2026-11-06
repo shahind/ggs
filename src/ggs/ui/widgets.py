@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
+    QStackedWidget,
     QWidget,
 )
 
@@ -262,3 +263,19 @@ class PromptEdit(QPlainTextEdit):
             self.submitted.emit()
             return
         super().keyPressEvent(e)
+
+
+class CurrentStack(QStackedWidget):
+    """A stacked widget sized by the page on show only, so a wide hidden page cannot widen the window."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.currentChanged.connect(lambda _i: self.updateGeometry())
+
+    def sizeHint(self):
+        w = self.currentWidget()
+        return w.sizeHint() if w is not None else super().sizeHint()
+
+    def minimumSizeHint(self):
+        w = self.currentWidget()
+        return w.minimumSizeHint() if w is not None else super().minimumSizeHint()

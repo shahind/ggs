@@ -8,8 +8,9 @@ Built from a drawing whose joints are known (``ggs.rig.joints``):
   pixels are the ones its bones own; where something in front hid it (the torso behind the near arm, the far leg's
   top behind the skirt) the hidden area is filled from the layer's own colours, so it can show when the limb
   moves away.
-- **Mesh**: a triangle grid over each layer. Every vertex is bound to the nearest bones of its layer and the bone
-  the layer hangs from (the torso for an arm), weighted by distance scaled by bone width, so joints blend.
+- **Mesh**: a triangle grid over each layer. Every vertex follows the nearest bone of its layer rigidly, and blends
+  with the neighbouring bone only close to their joint (a short bending zone at elbows and knees, almost none at
+  shoulders and hips), so sleeves, boots and hands keep their shape.
 - **Frames**: forward kinematics of the clip with the drawing's own bone lengths; each bone's move from the
   drawing's pose to the frame's pose moves its vertices (linear blend skinning); triangles are drawn layer by layer
   (near and far swap when the clip says the limbs crossed).
@@ -37,6 +38,10 @@ SKIRT_SHARE = 0.15  # cloth_share above this: the legs are drawn behind the body
 SKIRT_SWAY = 0.4  # how much of a leg's swing the skirt takes
 SMOOTH = 0.02  # owner smoothing window, standing heights
 REGION_MAJORITY = 0.6  # a colour region this much in one layer goes wholly to that layer
+JOINT_BLEND = 0.6  # bending zone around an elbow, knee, wrist, ankle, waist or neck (x the bone's width)
+ROOT_BLEND = 0.3  # around a shoulder or hip: a limb turns almost rigidly about it, like a cut-out piece
+TRUNK = ("pelvis", "waist", "torso", "chest")
+ISLAND = 0.15  # a piece of a layer smaller than this share of its main piece goes to its surroundings
 
 
 class SkinError(ValueError):
@@ -98,8 +103,6 @@ def _capsule(shape, p0: Point, p1: Point, r: float) -> np.ndarray:
 class SkinRig:
     def __init__(self, rig: RigSpec, image: np.ndarray, joints: Joints, labels: np.ndarray, widths: dict[str, float],
                  height_px: float, grid: float = GRID):
-        from ggs.rig.cutter import fill_from
-
         if image.shape[:2] != labels.shape:
             raise SkinError("drawing and labels differ in size")
         self.rig, self.joints, self.widths, self.height_px = rig, joints, widths, float(height_px)
@@ -124,6 +127,8 @@ class SkinRig:
         from ggs.rig.joints import ink_mask
 
         ink = ink_mask(image[..., :3], image[..., 3] > 5)  # outlines: never a fill colour
+        labels = tidy_labels(labels, rig, joints, widths)
+        self.labels = labels
         self.layers: list[Layer] = []
         for name, bones in layer_bones(rig):
             ids = [self.index[b] for b in bones]
@@ -135,14 +140,19 @@ class SkinRig:
             # where layers in front hide this one: along its own bones, as wide as the bone
             hidden = np.zeros_like(own)
             for b in bones:
-                hidden |= _capsule(own.shape, *joints[b], 0.9 * widths[b])
+                if b not in ("head", "neck"):  # the head's width is the hat's: its fill would cover the shoulders
+                    hidden |= _capsule(own.shape, *joints[b], 0.9 * widths[b])
             fill = hidden & front & ~own
+            trunk = [self.index[b] for b in bones if b in TRUNK]
+            if trunk and fill.any():  # the trunk under an arm: within the trunk's own outline (a sloping shoulder,
+                from ggs.rig.cutter import convex_hull_mask  # not a block sticking out)
+
+                seen = np.isin(labels, trunk) & (alpha > 0.5)
+                fill &= convex_hull_mask(seen) if seen.sum() > 50 else np.zeros_like(fill)
             known = own & ~ink if (own & ~ink).sum() > 50 else own
-            if name == "body":  # blend in from the surrounding colours
-                rgb = fill_from(rgba[..., :3] * 255.0, known, fill | (own & ~known)) / 255.0 if fill.any() \
-                    else rgba[..., :3]
-            else:  # a limb: the hidden part gets the limb's own typical colour (no shadow or outline streaks)
-                rgb = rgba[..., :3].copy()
+            # the hidden part gets the bone's own typical colour (no smears of hair, shadow or outline)
+            rgb = rgba[..., :3].copy()
+            if fill.any():
                 for b in bones:
                     mine = known & (labels == self.index[b])
                     src = mine if mine.sum() > 30 else known
@@ -195,29 +205,57 @@ class SkinRig:
         verts = np.array(verts, np.float32)
         tris = np.array(tris, np.int64)
         cand = self._candidates(bones)
-        dist = np.stack([_seg_dist(verts, *self.joints[b]) / self.widths[b] for b in cand], axis=1)
-        w = 1.0 / (dist + 0.15) ** WEIGHT_POWER
-        # a vertex only blends between its nearest bone and that bone's parent/children (no arm-to-leg pulls)
-        near = np.argmin(dist, axis=1)
-        allowed = np.zeros_like(w, bool)
-        for k, b in enumerate(cand):
-            rel = [m for m, o in enumerate(cand) if o == b or self.parent.get(o) == b or self.parent.get(b) == o]
-            allowed[np.ix_(near == k, rel)] = True
-        w = np.where(allowed, w, 0.0)
-        w /= w.sum(axis=1, keepdims=True)
         extra = [k for k, b in enumerate(cand) if b not in bones and self.parent.get(b) in bones]
-        if extra:  # the skirt sways with the legs, but mostly hangs from the waist
+        if extra:  # a skirt: smooth weights, sways with the legs but mostly hangs from the waist
+            dist = np.stack([_seg_dist(verts, *self.joints[b]) / self.widths[b] for b in cand], axis=1)
+            w = 1.0 / (dist + 0.15) ** WEIGHT_POWER
+            near = np.argmin(dist, axis=1)
+            allowed = np.zeros_like(w, bool)
+            for k, b in enumerate(cand):
+                rel = [m for m, o in enumerate(cand) if o == b or self.parent.get(o) == b or self.parent.get(b) == o]
+                allowed[np.ix_(near == k, rel)] = True
+            w = np.where(allowed, w, 0.0)
+            w /= w.sum(axis=1, keepdims=True)
             rigid = w.copy()
             rigid[:, extra] = 0.0
             ok = rigid.sum(axis=1, keepdims=True) > 1e-6
             rigid = np.where(ok, rigid / np.maximum(rigid.sum(axis=1, keepdims=True), 1e-6), w)
             w = SKIRT_SWAY * w + (1.0 - SKIRT_SWAY) * rigid
+        else:
+            w = self._joint_weights(verts, bones, cand)
         full = np.zeros((len(verts), len(self.bones)), np.float32)
         full[:, [self.index[b] for b in cand]] = w
         centres = verts[tris].mean(axis=1)
         own_d = np.stack([_seg_dist(centres, *self.joints[b]) / self.widths[b] for b in bones], axis=1)
         tri_bone = np.array([self.index[bones[k]] for k in np.argmin(own_d, axis=1)], np.int64)
         return Layer(name, bones, img, verts, tris, full, tri_bone)
+
+    def _joint_weights(self, verts: np.ndarray, bones: list[str], cand: list[str]) -> np.ndarray:
+        """Each vertex follows its nearest bone of the layer; near a joint it blends with the bone on the other
+        side (half and half at the joint, fading out over the bending zone). Columns follow ``cand``."""
+        dist = np.stack([_seg_dist(verts, *self.joints[b]) / self.widths[b] for b in bones], axis=1)
+        near = np.argmin(dist, axis=1)
+        col = {b: k for k, b in enumerate(cand)}
+        w = np.zeros((len(verts), len(cand)), np.float32)
+        for k, b in enumerate(bones):
+            sel = near == k
+            if not sel.any():
+                continue
+            v = verts[sel]
+            own = np.ones(len(v), np.float32)
+            others = [(o, self.joints[b][1], JOINT_BLEND) for o in bones if self.parent.get(o) == b]
+            p = self.parent.get(b)
+            if p is not None and p in col:
+                others.append((p, self.joints[b][0], JOINT_BLEND if p in bones else ROOT_BLEND))
+            for o, at, zone in others:
+                r = zone * 0.5 * (self.widths[b] + self.widths[o])
+                t = np.clip(np.hypot(v[:, 0] - at[0], v[:, 1] - at[1]) / max(r, 1e-6), 0.0, 1.0)
+                share = 0.5 * (1.0 - t * t * (3.0 - 2.0 * t))  # smoothstep: half at the joint, none at the edge
+                share = np.minimum(share, np.maximum(own - 0.5, 0.0))
+                w[sel, col[o]] += share
+                own -= share
+            w[sel, col[b]] += own
+        return w
 
     # ------------------------------------------------------------------ posing
 
@@ -408,6 +446,8 @@ def rasterize(dst: np.ndarray, src: np.ndarray, tris: np.ndarray, size: tuple[in
     eps = 1e-3
     inside = (u >= -eps) & (v >= -eps) & (u + v <= 1 + eps)
     px, py, t, u, v = px[inside], py[inside], t[inside], u[inside], v[inside]
+    if not len(px):  # every triangle is smaller than a pixel or off the canvas
+        return None, None
     s = src[tris[t]]
     sx = s[:, 0, 0] + u * (s[:, 1, 0] - s[:, 0, 0]) + v * (s[:, 2, 0] - s[:, 0, 0])
     sy = s[:, 0, 1] + u * (s[:, 1, 1] - s[:, 0, 1]) + v * (s[:, 2, 1] - s[:, 0, 1])
@@ -468,6 +508,66 @@ def vote_regions(labels: np.ndarray, rgba: np.ndarray, rig: RigSpec, joints: Joi
         sub[r] = np.array([names.index(b) for b in bones])[np.argmin(d, axis=1)]
     out = np.where(ink & mask, -1, out).astype(np.int16)
     return np.where(mask, nearest_labels(np.where(mask, out, -1).astype(np.int16), ink & mask), -1).astype(np.int16)
+
+
+def tidy_labels(labels: np.ndarray, rig: RigSpec, joints: Joints, widths: dict[str, float]) -> np.ndarray:
+    """Make each layer one plausible piece before skinning:
+    - trunk pixels outside the trunk that an upper arm explains much better go to that arm (the top of a sleeve
+      left with the body would stay behind on the shoulder when the arm moves);
+    - small islands of a layer, cut off from its main piece (a bit of a hand labelled as a leg), go to what
+      surrounds them, instead of flying off with a bone far away."""
+    from scipy import ndimage
+
+    from ggs.rig.cutter import nearest_labels
+
+    names = [b.name for b in rig.bones]
+    out = labels.copy()
+    mask = labels >= 0
+    trunk = [b for b in ("torso", "chest") if b in names and b in joints]
+    arms = [b for b in names if b.startswith("upper_arm") and b in joints]
+    root = "neck" if "neck" in joints else "head"
+    if root in joints and trunk:  # a hat or hair makes the head wide; at neck level the head is only the neck
+        (sx, sy), (ex, ey) = joints[root]
+        if root == "neck":
+            ex, ey = joints["head"][1] if "head" in joints else (ex, ey)
+        hid = [names.index(b) for b in ("neck", "head") if b in names]
+        ys, xs = np.nonzero(np.isin(out, hid))
+        ax, ay = ex - sx, ey - sy
+        n2 = max(ax * ax + ay * ay, 1e-6)
+        t = ((xs - sx) * ax + (ys - sy) * ay) / n2
+        side = np.abs((xs - sx) * ay - (ys - sy) * ax) / math.sqrt(n2)
+        loose = (t < 0.3) & (side > widths[trunk[-1]])
+        if loose.any():
+            pts = np.stack([xs[loose], ys[loose]], axis=1).astype(np.float32)
+            cands = trunk + arms
+            d = np.stack([_seg_dist(pts, *joints[b]) / widths[b] for b in cands], axis=1)
+            out[ys[loose], xs[loose]] = np.array([names.index(b) for b in cands], np.int16)[np.argmin(d, axis=1)]
+    if trunk and arms:
+        tid = [names.index(b) for b in trunk]
+        ys, xs = np.nonzero(np.isin(out, tid))
+        pts = np.stack([xs, ys], axis=1).astype(np.float32)
+        d_t = np.min([_seg_dist(pts, *joints[b]) / widths[b] for b in trunk], axis=0)
+        d_a = np.stack([_seg_dist(pts, *joints[b]) / widths[b] for b in arms], axis=1)
+        best = np.argmin(d_a, axis=1)
+        da = d_a[np.arange(len(pts)), best]
+        move = (d_t > 1.1) & (da < d_t) & (da < 2.0)
+        out[ys[move], xs[move]] = np.array([names.index(b) for b in arms], np.int16)[best[move]]
+    gone = np.zeros_like(mask)
+    for _, bones in layer_bones(rig):
+        ids = [names.index(b) for b in bones if b in names]
+        m = np.isin(out, ids)
+        if not m.any():
+            continue
+        comp, n = ndimage.label(m, structure=np.ones((3, 3), bool))
+        if n < 2:
+            continue
+        sizes = np.bincount(comp.ravel())[1:]
+        small = np.nonzero(sizes < ISLAND * sizes.max())[0] + 1
+        gone |= np.isin(comp, small)
+    if gone.any() and (mask & ~gone).any():
+        out[gone] = -1
+        out = np.where(mask, nearest_labels(np.where(mask, out, -1).astype(np.int16), gone), -1)
+    return out.astype(np.int16)
 
 
 def smooth_labels(labels: np.ndarray, size: int) -> np.ndarray:

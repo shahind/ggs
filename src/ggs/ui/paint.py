@@ -11,7 +11,7 @@ from collections import deque
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -23,6 +23,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from ggs.ui.icons import icon, set_icon
 
 UNDO = 40
 
@@ -185,36 +187,50 @@ class ImageEditor(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         bar = QHBoxLayout()
-        self.tools = QButtonGroup(self)
-        for i, (key, label, tip) in enumerate((
-                ("brush", "Brush", "Paint"), ("eraser", "Eraser", "Erase to transparent"),
-                ("fill", "Fill", "Fill an area of one colour"), ("picker", "Picker", "Pick a colour (or right-click)"))):
-            b = QPushButton(label)
-            b.setObjectName("tab")
-            b.setCheckable(True)
+        bar.setSpacing(2)
+
+        def tool_button(key: str, tip: str, checkable: bool = False) -> QToolButton:
+            b = QToolButton()
+            b.setIcon(icon(key))
+            b.setIconSize(QSize(18, 18))
             b.setToolTip(tip)
+            b.setCheckable(checkable)
+            b.setAutoRaise(True)
+            return b
+
+        self.tools = QButtonGroup(self)
+        for i, (key, tip) in enumerate((("brush", "Brush (paint)"), ("eraser", "Eraser (erase to transparent)"),
+                                        ("fill", "Fill (an area of one colour)"),
+                                        ("picker", "Colour Picker (or right-click)"))):
+            b = tool_button(key, tip, checkable=True)
             b.setProperty("tool", key)
             b.setChecked(i == 0)
             self.tools.addButton(b, i)
             bar.addWidget(b)
-        self.swatch = QPushButton("   ")
+        bar.addSpacing(8)
+        self.swatch = QPushButton()
+        self.swatch.setFixedSize(26, 26)
         self.swatch.setToolTip("Colour")
         self.swatch.clicked.connect(self._choose)
         bar.addWidget(self.swatch)
         self.size = QSlider(Qt.Orientation.Horizontal)
         self.size.setRange(1, 60)
         self.size.setValue(6)
-        self.size.setFixedWidth(110)
-        self.size.setToolTip("Brush size")
+        self.size.setFixedWidth(90)
+        self.size.setToolTip("Brush Size")
         bar.addWidget(self.size)
-        bar.addStretch(1)
-        for label, fn in (("Undo", lambda: self.canvas.do_undo()), ("Redo", lambda: self.canvas.do_redo()),
-                          ("Fit", lambda: self.canvas.fit())):
-            b = QPushButton(label)
+        bar.addSpacing(8)
+        for key, tip, fn in (("undo", "Undo (Ctrl+Z)", lambda: self.canvas.do_undo()),
+                             ("redo", "Redo (Ctrl+Y)", lambda: self.canvas.do_redo()),
+                             ("fit", "Fit to Window", lambda: self.canvas.fit())):
+            b = tool_button(key, tip)
             b.clicked.connect(fn)
             bar.addWidget(b)
+        bar.addStretch(1)
         self.open_with = QToolButton()
+        set_icon(self.open_with, "open_with")
         self.open_with.setText("Open With")
+        self.open_with.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.open_with.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         menu = QMenu(self.open_with)
         for name, exe in find_editors():
@@ -223,19 +239,24 @@ class ImageEditor(QWidget):
         self.open_with.setMenu(menu)
         self.open_with.setToolTip("Edit in an installed editor; changes saved there are loaded here")
         bar.addWidget(self.open_with)
+        lay.addLayout(bar)
         self.revert = QPushButton("Revert")
+        set_icon(self.revert, "revert")
         self.revert.clicked.connect(self.reload)
         self.save_btn = QPushButton("Save")
         self.save_btn.setObjectName("primary")
+        set_icon(self.save_btn, "save")
         self.save_btn.clicked.connect(self.save)
-        bar.addWidget(self.revert)
-        bar.addWidget(self.save_btn)
-        lay.addLayout(bar)
+        foot = QHBoxLayout()
+        foot.addStretch(1)
+        foot.addWidget(self.revert)
+        foot.addWidget(self.save_btn)
         self.canvas = PaintCanvas(QImage(str(self.path)) if self.path else QImage(8, 8, QImage.Format.Format_ARGB32))
         self.canvas.picked.connect(self._set_colour)
         self.tools.idClicked.connect(lambda i: setattr(self.canvas, "tool", self.tools.button(i).property("tool")))
         self.size.valueChanged.connect(lambda v: setattr(self.canvas, "size", v))
         lay.addWidget(self.canvas, 1)
+        lay.addLayout(foot)
         self.watch = QFileSystemWatcher(self)
         self.watch.fileChanged.connect(lambda _p: self.reload())
         self._set_colour(QColor(0, 0, 0))

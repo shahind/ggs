@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- GGS app logo: drawn for GGS, not part of the Lucide set -->
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="#FFEA00"/>
+  <path d="M112 52 C119 104 136 121 188 128 C136 135 119 152 112 204 C105 152 88 135 36 128 C88 121 105 104 112 52 Z"
+        fill="#16171c"/>
+  <path d="M188 46 C191 66 198 73 218 76 C198 79 191 86 188 106 C185 86 178 79 158 76 C178 73 185 66 188 46 Z"
+        fill="#16171c"/>
+  <rect x="170" y="164" width="34" height="34" rx="6" fill="#16171c"/>
+</svg>

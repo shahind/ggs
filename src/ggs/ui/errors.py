@@ -149,7 +149,7 @@ def busy_refusal(parent, queue) -> bool:
     return False
 
 
-def trash_icon(widget):
-    from PySide6.QtWidgets import QStyle
+def trash_icon(_widget=None):
+    from ggs.ui.icons import icon
 
-    return widget.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon)
+    return icon("delete")

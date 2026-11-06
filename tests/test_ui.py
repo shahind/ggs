@@ -254,7 +254,7 @@ def test_live_editor_plays_and_touches_up(qapp, tmp_path):
     ed._confirm()
     assert ed.modes.checkedId() == 0
     ed.set_clip(load_clip(walk), "walk", tmp_path / "edits")
-    assert ed.lead_n > 0 and ed.clip.frame_count == load_clip(walk).frame_count + ed.lead_n  # lead-in in front
+    assert ed.lead_n == 0 and ed.clip.frame_count == load_clip(walk).frame_count  # plays from the clip's own start
     for f in (0, 3, ed.lead_n + 4):
         ed.slider.setValue(f)
     assert ed.canvas.image is not None and not ed.canvas.image.isNull() and ed.canvas.handles
@@ -283,3 +283,20 @@ def test_paint_dialog_fills_and_saves(qapp, tmp_path):
     dlg.canvas._fill(QPointF(5, 5))
     dlg._save()
     assert Image.open(f).convert("RGBA").getpixel((20, 20)) == (0, 0, 255, 255)
+
+
+def test_every_icon_the_app_uses_exists(qapp):
+    import re
+    from pathlib import Path
+
+    from ggs.ui import icons
+    from ggs.ui.kinds import KINDS
+
+    have = set(icons.names())
+    src = Path(icons.__file__).resolve().parents[1]
+    used = set()
+    for f in src.glob("*.py"):
+        used |= set(re.findall(r'(?:set_icon\([\w.]+, |icon\(|pixmap\(|padded\()"(\w+)"', f.read_text(encoding="utf-8")))
+    used |= {k.icon for k in KINDS} | {"app"}
+    assert used <= have, used - have
+    assert not icons.icon("delete").isNull() and not icons.icon("export", "dark").isNull()
