@@ -359,6 +359,25 @@ def cut_parts(master: np.ndarray, guide_labels: np.ndarray, spec: MasterSpec, ri
 
 
 OVERLAP = 0.6  # how far (x the part's half-width) a part continues under its neighbour across a joint
+TRUNK_PARTS = ("torso", "pelvis", "chest", "waist")
+NO_HIDDEN = ("head", "neck", "hair_back", "skirt", "cape")
+
+
+def hidden_shape(own: np.ndarray, front: np.ndarray, joints, bone: str, width: float, trunk: bool,
+                 opaque: np.ndarray) -> np.ndarray:
+    """Where a part continues under the parts drawn in front of it (the chest under the near arm, the hip under
+    the near thigh): a limb along its bone at its own width, a trunk within its own outline. Only pixels the
+    front parts cover, and only inside the drawing."""
+    from ggs.rig.skin import _capsule
+
+    (sx, sy), (ex, ey) = joints[bone]
+    if trunk:
+        if own.sum() < 50:
+            return np.zeros_like(own)
+        shape = convex_hull_mask(own) & _capsule(own.shape, (sx, sy), (ex, ey), 1.4 * width)
+    else:
+        shape = _capsule(own.shape, (sx, sy), (ex, ey), width)
+    return shape & front & opaque & ~own
 
 
 def _clean_parts(master: np.ndarray, labels: np.ndarray, spec: MasterSpec, rig: RigSpec, draw_order: list[str],
@@ -367,7 +386,8 @@ def _clean_parts(master: np.ndarray, labels: np.ndarray, spec: MasterSpec, rig: 
     - across each joint, the part drawn *below* continues a little under its neighbour, using the neighbour's
       own art, but only where it is the same material (the same colour area: skin into skin, cloth into cloth),
       so a bent elbow shows no gap and no piece carries a wedge of another part;
-    - nothing is invented: no fills, no discs, no blur."""
+    - where a part drawn in front covers this one (the chest under the near arm), the hidden area is added to the
+      part in its own flat colour and marked as invented, for the refiner to paint (``ggs.rig.refine``)."""
     index = {b.name: i for i, b in enumerate(rig.bones)}
     order = {n: k for k, n in enumerate(draw_order)}
     parent = {b.name: b.parent for b in rig.bones}
@@ -412,11 +432,20 @@ def _clean_parts(master: np.ndarray, labels: np.ndarray, spec: MasterSpec, rig: 
         own = labels == index[p.bone]
         if own.sum() < 20:
             raise CutError(f"part {p.name!r}: almost no master pixels were labelled with it")
+        front = np.isin(labels, [index[n] for n in draw_order if n in index and order[n] > order[p.bone]])
         hidden = np.zeros(labels.shape, bool)
+        if p.bone not in NO_HIDDEN:  # the head's width is its hair or hat: it has no hidden continuation
+            hidden = hidden_shape(own, front, spec.joints, p.bone, max(widths.get(p.bone, 8.0), 3.0),
+                                  p.bone in TRUNK_PARTS, on) & ~extra[p.bone]
         body = own | extra[p.bone]
         out = np.zeros((*labels.shape, 4), np.uint8)
         out[..., :3] = np.where(body[..., None], rgb, 0).astype(np.uint8)
         out[..., 3] = np.where(body, alpha, 0).astype(np.uint8)
+        if hidden.any():  # placeholder: the part's typical colour (not its outline), painted over by the refiner
+            known = own & on & ~ink
+            src = known if known.sum() >= 30 else own & on
+            out[hidden, :3] = np.median(rgb[src], axis=0).astype(np.uint8)
+            out[hidden, 3] = 255
         w = 2.0 * widths.get(p.bone, 8.0)
         parts[p.name] = CutPart(p, out, own, int(hidden.sum()), angle, (sx, sy), length,
                                 {"start": w, "end": w}, hidden)

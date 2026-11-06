@@ -97,13 +97,17 @@ class MotionSpec(BaseModel):
 
 
 class FramesSpec(BaseModel):
-    """Pose-driven frames: SD 1.5 base, AnimateDiff motion adapter, OpenPose ControlNet, IP-Adapter folder."""
+    """Pose-driven frames. AnimateDiff: SD 1.5 base, motion adapter, OpenPose ControlNet, IP-Adapter folder.
+    One-to-All: ``model`` (its checkpoint), ``base`` (Wan2.1 1.3B: VAE, tokenizer, configs), ``text_encoder``
+    (umT5-xxl file)."""
 
     registry: str
-    base: list[str]
-    motion: list[str]
-    controlnet: list[str]
-    ip_adapter: list[str]
+    base: list[str] = Field(default_factory=list)
+    motion: list[str] = Field(default_factory=list)
+    controlnet: list[str] = Field(default_factory=list)
+    ip_adapter: list[str] = Field(default_factory=list)
+    model: list[str] = Field(default_factory=list)
+    text_encoder: list[str] = Field(default_factory=list)
 
 
 class PipelinesFile(BaseModel):
@@ -202,7 +206,9 @@ def resolve_frames(name: str, dirs: list[Path] | None = None, spec_file: Pipelin
     if name not in spec_file.frames:
         raise ValueError(f"unknown frames model {name!r}; known: {sorted(spec_file.frames)}")
     s, dirs = spec_file.frames[name], dirs or model_dirs()
-    return {k: resolve(getattr(s, k), dirs, f"{name} {k}") for k in ("base", "motion", "controlnet", "ip_adapter")}
+    keys = ("base", "motion", "controlnet", "ip_adapter", "model", "text_encoder")
+    return {k: resolve(getattr(s, k), dirs, f"{name} {k}", need_weights=(k != "base" or not s.model))
+            for k in keys if getattr(s, k)}
 
 
 def _motion_spec(name: str, spec_file: PipelinesFile | None) -> MotionSpec:

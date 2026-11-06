@@ -1662,8 +1662,9 @@ def build_parser() -> argparse.ArgumentParser:
     cfr.add_argument("--count", type=int, default=1, help="sheets to try; the best is kept")
     cfr.add_argument("--profile", choices=["standard", "lite"], default=None)
     cfr.add_argument("--no-vram-check", action="store_true")
-    cfr.add_argument("--method", default="auto", choices=["auto", "animatediff", "klein"],
-                     help="animatediff: pose-driven frame model (when downloaded); klein: one sheet of poses")
+    cfr.add_argument("--method", default="auto", choices=["auto", "one_to_all", "animatediff", "klein"],
+                     help="one_to_all / animatediff: pose-driven frame models (when downloaded); klein: one sheet "
+                          "of poses; auto: the best one downloaded")
     cfr.set_defaults(func=cmd_character_frames)
     cc = char.add_parser("cut", help="cut a master.json into a part sheet and validate it (exit 2 if rejected)")
     cc.add_argument("master", help="master.json written by `ggs character master`")

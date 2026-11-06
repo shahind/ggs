@@ -58,6 +58,11 @@ pose:
 # Pose-driven frames (Animate > Drawn frames): SD 1.5 (DreamShaper 8) + AnimateDiff motion adapter + ControlNet
 # OpenPose + IP-Adapter Plus (with its image encoder in models/image_encoder).
 frames:
+  one-to-all-1.3b:
+    registry: one-to-all-1.3b
+    model: [One-to-All-1.3b_2]
+    base: [Wan2.1-T2V-1.3B-Diffusers]
+    text_encoder: [umt5-xxl/split_files/text_encoders/umt5_xxl_fp16.safetensors]
   animatediff-sd15:
     registry: animatediff-motion-adapter-v1-5-3
     base: [dreamshaper-8]

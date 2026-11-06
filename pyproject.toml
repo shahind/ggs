@@ -60,3 +60,4 @@ addopts = "-m 'not gpu'"
 
 [tool.ruff]
 line-length = 100
+extend-exclude = ["src/ggs/third_party"]  # vendored code, kept as published

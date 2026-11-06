@@ -37,6 +37,23 @@ packs:
       - repo: mattmdjaga/segformer_b2_clothes
         dir: segformer-b2-clothes
         include: ["*.json", "model.safetensors"]
+  frames_o2a:
+    label: Frame animator (One-to-All, optional)
+    why: Draws a character's animation frame by frame from the design and the animation's skeleton.
+    required: false
+    size_gb: 18.1
+    ready_when: {frames: [one-to-all-1.3b]}
+    parts:
+      - repo: MochunniaN1/One-to-All-1.3b_2
+        dir: One-to-All-1.3b_2
+        include: ["*.json", "*.safetensors"]
+      - repo: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+        dir: Wan2.1-T2V-1.3B-Diffusers
+        include: ["model_index.json", "scheduler/*", "tokenizer/*", "text_encoder/config.json",
+                  "transformer/config.json", "vae/*"]
+      - repo: Comfy-Org/Wan_2.1_ComfyUI_repackaged
+        dir: umt5-xxl
+        include: ["split_files/text_encoders/umt5_xxl_fp16.safetensors"]
   frames:
     label: Frame animator (AnimateDiff + OpenPose, optional)
     why: Draws a character's animation frame by frame, following the skeleton and keeping the design.

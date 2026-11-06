@@ -23,8 +23,9 @@ from ggs.rig.spec import RigSpec
 
 KEEP = ("Keep everything else exactly the same: same character, same drawing style, same size, position and angle, "
         "plain white background.")
-FILL_PROMPT = ("This is the {part} piece of a cut-out 2D game character. Repaint the blurry smudged areas so they "
-               "match the rest of the piece, with clean shapes and crisp outlines. " + KEEP)
+FILL_PROMPT = ("This is the {part} piece of a cut-out 2D game character. Part of it was hidden behind an arm or "
+               "leg and is shown as a flat area of one colour. Paint that area so the {part} is complete and whole: "
+               "continue its clothing, folds, skin and outlines naturally, in the same drawing style. " + KEEP)
 EXPR_PROMPT = "Edit the head in the image so {what}. " + KEEP
 EXPRESSIONS = {
     "blink": "the eyes are closed (blinking)",
@@ -36,7 +37,7 @@ EXPRESSIONS = {
 @dataclass
 class RefineSettings:
     scale: int = 3  # cells are edited at cell_px * scale (768 px for 256 px cells)
-    min_fill: float = 0.08  # repaint a part when this share of its pixels was filled in
+    min_fill: float = 0.02  # repaint a part when this share of its pixels was filled in
     expressions: bool = True
     fills: bool = True
     seed: int = 0

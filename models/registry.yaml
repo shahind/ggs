@@ -147,6 +147,35 @@ entries:
     source: https://huggingface.co/Lykon/dreamshaper-8
     notes: "OpenRAIL-M (use restrictions, commercial use of outputs allowed). Base for AnimateDiff frames."
 
+  - id: one-to-all-1.3b
+    kind: component
+    name: One-to-All Animation 1.3B (v2 checkpoint, Wan2.1-T2V-1.3B based)
+    license: Apache-2.0
+    commercial: "yes"
+    min_vram_gb: 6
+    source: https://huggingface.co/MochunniaN1/One-to-All-1.3b_2
+    notes: "Apache-2.0 (code github.com/ssj9596/One-to-All-Animation and weights, per the repo and model card,
+      2026-11-05). Pose-driven character animation, alignment-free, trained with cartoon data. Inference code
+      vendored in src/ggs/third_party/one_to_all. Needs wan2.1-t2v-1.3b (VAE, tokenizer, configs) and umt5-xxl."
+
+  - id: wan2.1-t2v-1.3b
+    kind: component
+    name: Wan2.1 T2V 1.3B (diffusers; VAE, tokenizer and configs only)
+    license: Apache-2.0
+    commercial: "yes"
+    min_vram_gb: 1
+    source: https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+
+  - id: umt5-xxl
+    kind: component
+    name: umT5-xxl text encoder (fp16, Comfy-Org repack of the Wan2.1 text encoder)
+    license: Apache-2.0
+    commercial: "yes"
+    min_vram_gb: 1
+    source: https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged
+    notes: "Wan's umT5-xxl (Apache-2.0) in fp16 (11.4 GB instead of the 21 GB fp32 copy). Streamed onto the GPU
+      layer by layer; prompt embeddings are cached in ~/.ggs/cache/one_to_all."
+
   - id: animatediff-motion-adapter-v1-5-3
     kind: component
     name: AnimateDiff motion adapter v1-5-3 (SD 1.5)

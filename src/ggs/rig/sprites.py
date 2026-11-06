@@ -267,18 +267,116 @@ def frames_dir(item_dir: Path) -> Path:
 
 
 def frames_method() -> str:
-    """'animatediff' when its models are downloaded, else 'klein' (the drawing model)."""
+    """The best pose-driven frame model that is downloaded: 'one_to_all', then 'animatediff', else 'klein'
+    (the drawing model)."""
     from ggs.pipeline.models import MissingModelError, resolve_frames
 
-    try:
-        resolve_frames(ANIMATEDIFF)
-        return "animatediff"
-    except (MissingModelError, ValueError):
-        return "klein"
+    for method, name in (("one_to_all", ONE_TO_ALL), ("animatediff", ANIMATEDIFF)):
+        try:
+            resolve_frames(name)
+            return method
+        except (MissingModelError, ValueError):
+            continue
+    return "klein"
 
 
 ANIMATEDIFF = "animatediff-sd15"
+ONE_TO_ALL = "one-to-all-1.3b"
 AD_SIZE = (384, 512)
+O2A_SIZE = (384, 576)  # w, h: multiples of 16, short side 384 as One-to-All's 1.3B inference uses
+
+
+def _crop_frames(rgba: list, size: tuple[int, int], pad: int = 4):
+    """Frames cropped to one shared box, and the anchor (x of the canvas centre, ground at the box bottom)."""
+    box = None
+    for im in rgba:
+        bb = im.getchannel("A").point(lambda v: 255 if v > 24 else 0).getbbox()
+        if bb:
+            box = bb if box is None else (min(box[0], bb[0]), min(box[1], bb[1]), max(box[2], bb[2]), max(box[3], bb[3]))
+    if box is None:
+        raise ValueError("the frames came out empty")
+    box = (max(0, box[0] - pad), max(0, box[1] - pad), min(size[0], box[2] + pad), min(size[1], box[3] + pad))
+    return [im.crop(box) for im in rgba], (round(size[0] / 2 - box[0]), box[3] - box[1] - pad)
+
+
+def o2a_inputs(d: Path, clip, n: int):
+    """One-to-All's inputs for a character item and a clip: (reference on white, its pose image, pose images of
+    4k+1 frames, which of them to keep for ``n`` frames). The design stands on the canvas's ground line; the
+    clip's skeleton has the design's proportions and its mean hip height where the design's hips are."""
+    from PIL import Image
+
+    from ggs.items import design_dir
+    from ggs.pipeline.one_to_all import draw_pose
+    from ggs.rig.pose import bone_defs, pose_bones
+    from ggs.rig.poses import rig_for
+    from ggs.rig.stick import openpose_points
+    from ggs.rig.warp import design_skeleton
+
+    w, h = O2A_SIZE
+    rig = rig_for("side")
+    _, joints, hp = design_skeleton(d)
+    design = Image.open(design_dir(d) / "design.png").convert("RGBA")
+    ground = max(max(s[1], e[1]) for b, (s, e) in joints.items() if b.startswith("foot"))
+    feet = max(design.getchannel("A").getbbox()[3], ground)
+    root = joints["pelvis"][0]
+    k = 0.8 * h / hp  # canvas px per design px: the standing height fills 80% of the canvas
+    gy = 0.93 * h  # the ground line in the canvas
+    ox, oy = w / 2 - root[0] * k, gy - feet * k
+
+    def to_canvas(p):
+        return (ox + p[0] * k, oy + p[1] * k)
+
+    ref = Image.new("RGB", (w, h), "white")
+    small = design.resize((max(1, round(design.width * k)), max(1, round(design.height * k))), Image.LANCZOS)
+    ref.paste(small, (round(ox), round(oy)), small)
+    ref_pose = draw_pose(openpose_points({b: (to_canvas(s), to_canvas(e)) for b, (s, e) in joints.items()}, "side"),
+                         (w, h))
+    m = 4 * math.ceil(max(n - 1, 4) / 4) + 1  # One-to-All draws 4k+1 frames
+    idx = frame_indices(clip, m)
+    lengths = _design_lengths(d)
+    unit = hp * k  # canvas px per standing height
+    root_y = sum(clip.root.y) / len(clip.root.y)
+    poses = []
+    for f in idx:
+        p = pose_bones(bone_defs(rig), clip, f, lengths, 1.0, True)
+        # the clip's mean hip height stands where the design's hips are
+        pj = {b: ((w / 2 + s_[0] * unit, to_canvas(root)[1] + (s_[1] - root_y) * unit),
+                  (w / 2 + e[0] * unit, to_canvas(root)[1] + (e[1] - root_y) * unit)) for b, (s_, e) in p.items()}
+        poses.append(draw_pose(openpose_points(pj, "side"), (w, h)))
+    keep = [round(i * (m - 1) / max(n - 1, 1)) for i in range(n)] if n < m else list(range(m))
+    return ref, ref_pose, poses, keep
+
+
+def _one_to_all_frames(d: Path, info: dict, clip, n: int, seed: int, profile: str, enforce_vram: bool,
+                       motion: str = ""):
+    """(RGBA frames cropped to one box, anchor, pose strip) drawn by One-to-All: the design as the reference,
+    the clip's skeleton in the design's proportions (``o2a_inputs``)."""
+    from PIL import Image
+
+    from ggs.generate import real_rgba
+    from ggs.pipeline.matting import BiRefNetMatter
+    from ggs.pipeline.models import load_pipelines, resolve_frames, resolve_matting
+    from ggs.pipeline.one_to_all import OneToAllFrames
+    from ggs.pipeline.vram import Stages
+
+    w, h = O2A_SIZE
+    ref, ref_pose, poses, keep = o2a_inputs(d, clip, n)
+    who = "; ".join(info.get("text") or ["a character"])
+    doing = f", {motion}" if motion else ""
+    prompt = (f"{who}{doing}, full body, side view, facing right, 2d game character, plain white background, "
+              "clear hands")
+    spec = load_pipelines()
+    stages = Stages(profile=profile, enforce=enforce_vram)
+    rgb = OneToAllFrames(resolve_frames(ONE_TO_ALL, spec_file=spec)).generate(poses, ref, ref_pose, prompt, seed,
+                                                                              w, h, stages)
+    rgb = [rgb[i] for i in keep]
+    alphas = BiRefNetMatter(resolve_matting("birefnet", spec_file=spec)).alphas(rgb, stages)
+    rgba = [Image.fromarray(real_rgba(im, a)[0], "RGBA") for im, a in zip(rgb, alphas, strict=True)]
+    frames, anchor = _crop_frames(rgba, (w, h))
+    strip = Image.new("RGB", (w // 2 * len(keep), h // 2))
+    for i, j in enumerate(keep):
+        strip.paste(poses[j].resize((w // 2, h // 2)), (i * w // 2, 0))
+    return frames, anchor, strip
 
 
 def _design_lengths(d: Path) -> dict[str, float]:
@@ -413,10 +511,16 @@ def make_frames(project: Path, ref: str, clip_path: str | Path, *, frames: int =
         spec.body = (BodyShape(**cs.body) if cs.body else PRESETS[cs.body_preset]).model_dump()
     (work / "master.json").write_text(json.dumps(spec.model_dump(), indent=1), encoding="utf-8")
     method = frames_method() if method == "auto" else method
-    if method == "animatediff" and model != "stub":
-        progress.start("frames:animatediff", ["animate", "matte"])
+    if method in ("animatediff", "one_to_all") and model != "stub":
         seed = (seeds or [drawing["seed"]])[0]
-        fr, anchor, strip = _animatediff_frames(d, info, clip, min(frames, 16), seed, profile, enforce_vram, motion)
+        if method == "one_to_all":
+            progress.start("frames:one_to_all", ["encode", "animate", "matte"])
+            fr, anchor, strip = _one_to_all_frames(d, info, clip, min(frames, 33), seed, profile, enforce_vram,
+                                                   motion)
+        else:
+            progress.start("frames:animatediff", ["animate", "matte"])
+            fr, anchor, strip = _animatediff_frames(d, info, clip, min(frames, 16), seed, profile, enforce_vram,
+                                                    motion)
         fps = len(fr) / clip.duration
         (out / "frames").mkdir()
         for k, f in enumerate(fr):
@@ -427,7 +531,7 @@ def make_frames(project: Path, ref: str, clip_path: str | Path, *, frames: int =
         strip.save(out / "poses.png")
         (out / "report.json").write_text(json.dumps({
             "format": "ggs.frames", "version": 1, "clip": str(clip_path), "frames": len(fr), "fps": round(fps, 3),
-            "seed": seed, "passed": True, "anchor": list(anchor), "method": "animatediff", "checks": []},
+            "seed": seed, "passed": True, "anchor": list(anchor), "method": method, "checks": []},
             indent=1), encoding="utf-8")
         return out, []
     progress.start(f"frames:{model}", ["encode", "denoise", "matte"])

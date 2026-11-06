@@ -264,8 +264,8 @@ def make_slices(project: Path, ref: str, template: str = "side_simple", *, layou
         style, weight = f"{meta.trigger}, ", drawing.get("style_weight") or meta.recommended_weight
     seeds = seeds or [drawing["seed"] + i for i in range(3)]
     view_words = "side view facing right" if side else "front view facing the viewer, symmetrical T-pose"
-    progress.start(f"slices:{model}", ["encode", "denoise", "matte", "joints", "cut"] +
-                   (["denoise", "matte"] if t.refine else []))
+    progress.start(f"slices:{model}", ["encode", "denoise", "matte", "joints", "cut", "denoise"] +
+                   (["matte"] if t.refine else []))
     recipe = load_recipe("sprite")
     gen, matter = build_backends(recipe, model, profile)
     stages = Stages(profile=profile, enforce=enforce_vram)
@@ -301,7 +301,7 @@ def make_slices(project: Path, ref: str, template: str = "side_simple", *, layou
     if side and layout == "auto" and fitted:  # the drawing tells more than the design: suggest again from it
         lay, measures = suggest_from_try(masters[0][2], rig, cs.body_preset)
     return _cut_tries(project, rec, d, out, [(sd, folder, m) for sd, folder, m in masters], rig, lay, measures,
-                      t, fitted, stages, refine=(t.refine and can_refine), model=model, profile=profile,
+                      t, fitted, stages, refine=can_refine, model=model, profile=profile,
                       enforce_vram=enforce_vram)
 
 
@@ -403,10 +403,11 @@ def _cut_tries(project, rec, d, out, masters, rig, lay, measures, t, fitted, sta
         usable = [x for x in tries if x["cut"] and x["score"] >= ROUGH_IOU]
         if usable:
             best, rough = Path(max(usable, key=lambda x: x["score"])["folder"]) / "character", True
-    if best is not None and refine:
-        from ggs.rig.refine import refine_characters
+    if best is not None and refine:  # paint the hidden areas (always); draw expressions for the detailed template
+        from ggs.rig.refine import RefineSettings, refine_characters
 
-        refine_characters([best], cut_rig, model=model, profile=profile, enforce_vram=enforce_vram)
+        refine_characters([best], cut_rig, model=model, profile=profile, enforce_vram=enforce_vram,
+                          settings=RefineSettings(expressions=t.refine))
     for f in out.glob("*"):  # replace the previous sliced version (the work folder stays)
         if f.name != "work":
             shutil.rmtree(f) if f.is_dir() else f.unlink()
