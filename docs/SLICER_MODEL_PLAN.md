@@ -65,3 +65,24 @@ See-through merges thigh and shin. So we train our own.
    slicer.
 3. If the score gap is large, restyle (B) and add owner corrections (C).
 4. Hidden-part LoRA only if klein zero-shot is not good enough.
+
+## Owner's preferred route: the drawing model makes the sheet from the prompt
+No public LoRA does this (checked 2026-11-05):
+- Character-sheet and turnaround LoRAs show views, not parts.
+- fal's klein sprite-sheet LoRA draws objects in 2x2 grids.
+- Layer.ai's parts sheet is a paid service.
+
+What it takes:
+1. **Pairs:** caption + part sheet in GGS's grid (the rig's cells, pivots and proportions), 300–2,000 of them.
+   - From the Blender generator above: CC0 3D characters exploded into the grid.
+   - Each sheet is redrawn by klein as 2D art, the whole sheet at once so the parts stay alike.
+   - Plus GGS characters whose slicing passed and that the owner approves.
+   - Captions from Qwen3-VL (already in GGS).
+2. **Conditioning:** the faint layout guide of the grid (each cell's bone for the chosen body shape) as klein's
+   reference image, so sizes come out exact. The prompt and style LoRAs give the look.
+3. **Training:** a klein 4B LoRA (rank 32–64, 2,000–3,000 steps) with GGS's edit-LoRA trainer
+   (`ggs.style.train_edit`, reference tokens). About 2–3 h at 512 px on the 8 GB laptop; 768–1024 px on the
+   16 GB desktop.
+4. **Use:** "Generate" on a character can produce the sheet directly. The design shown to the user is the sheet
+   reassembled in a standing pose. The reassembly validator scores every sheet and retries bad seeds.
+5. **Licences:** CC0 assets, captions made by GGS, LoRA weights ours. Registry entry + LICENSE_REVIEW row.
