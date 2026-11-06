@@ -827,7 +827,7 @@ def cmd_character_frames(args: argparse.Namespace) -> int:
     try:
         out, results = make_frames(Path(args.project), args.item, args.clip, frames=args.frames, seeds=seeds,
                                    profile=profile, enforce_vram=not args.no_vram_check, name=args.name,
-                                   method=args.method)
+                                   method=args.method, pose_style=args.pose_style)
     except (ItemError, MissingModelError, VramBudgetError, ValueError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -1662,6 +1662,8 @@ def build_parser() -> argparse.ArgumentParser:
     cfr.add_argument("--count", type=int, default=1, help="sheets to try; the best is kept")
     cfr.add_argument("--profile", choices=["standard", "lite"], default=None)
     cfr.add_argument("--no-vram-check", action="store_true")
+    cfr.add_argument("--pose-style", default="skeleton", choices=["skeleton", "silhouette", "both"],
+                     help=argparse.SUPPRESS)  # experiments: what One-to-All is shown for each pose
     cfr.add_argument("--method", default="auto", choices=["auto", "one_to_all", "animatediff", "klein"],
                      help="one_to_all / animatediff: pose-driven frame models (when downloaded); klein: one sheet "
                           "of poses; auto: the best one downloaded")

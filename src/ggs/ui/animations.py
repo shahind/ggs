@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 from ggs.ui import commands as C
 from ggs.ui.icons import set_icon
 from ggs.ui.jobs import Job, JobQueue
+from ggs.ui.widgets import movie_from_file
 
 ROLE = 256
 STARTER = "starter"
@@ -108,7 +109,7 @@ class Preview(QFrame):
         self.movie = None
         self.view.clear()
         if gif and Path(gif).is_file():
-            self.movie = QMovie(str(gif))
+            self.movie = movie_from_file(gif)
             self.view.setMovie(self.movie)
             self.movie.start()
         else:

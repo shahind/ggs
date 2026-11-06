@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 from ggs.paths import repo_root
 from ggs.ui import commands as C
 from ggs.ui.jobs import Job, JobQueue
-from ggs.ui.widgets import ImageGrid, PathPicker
+from ggs.ui.widgets import ImageGrid, PathPicker, movie_from_file
 
 BODIES = ["standard", "heroic", "chibi", "stocky", "lanky", "child"]
 FORMATS = ["apng", "webp", "gif", "sheet", "rig", "godot", "unity", "defold"]
@@ -492,7 +492,7 @@ class AnimatePage(QWidget):
     def _show(self, ok: bool, out: Path, preview: Path) -> None:
         self.status.setText(f"Wrote {out}" if ok else "Failed: see the log below.")
         if ok and preview.exists():
-            self.movie = QMovie(str(preview))
+            self.movie = movie_from_file(preview)
             self.preview.setMovie(self.movie)
             self.movie.start()
 

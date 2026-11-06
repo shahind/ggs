@@ -58,3 +58,21 @@ def test_one_to_all_never_draws_too_short_a_clip():
     assert o2a_frame_count(8) == o2a_frame_count(12) == O2A_MIN_FRAMES == 17  # 13 frames grey out
     assert o2a_frame_count(20) == 21 and o2a_frame_count(25) == 25
     assert all((o2a_frame_count(n) - 1) % 4 == 0 and o2a_frame_count(n) >= n for n in range(1, 40))
+
+
+def test_frames_are_brought_back_to_the_designs_colours():
+    from PIL import Image
+
+    from ggs.rig.sprites import match_colours
+
+    rng = np.random.default_rng(0)
+    ref = np.zeros((64, 64, 4), np.uint8)
+    ref[16:48, 16:48, :3] = rng.integers(60, 200, (32, 32, 3))
+    ref[16:48, 16:48, 3] = 255
+    drift = ref.copy()
+    drift[..., :3] = np.clip(drift[..., :3].astype(int) * 0.7 + np.array([40, 20, -10]), 0, 255).astype(np.uint8)
+    out = np.asarray(match_colours([Image.fromarray(drift, "RGBA")], Image.fromarray(ref, "RGBA"))[0])
+    on = ref[..., 3] > 0
+    before = np.abs(drift[on][:, :3].astype(int) - ref[on][:, :3]).mean()
+    after = np.abs(out[on][:, :3].astype(int) - ref[on][:, :3]).mean()
+    assert after < 0.2 * before and (out[..., 3] == drift[..., 3]).all()

@@ -279,3 +279,18 @@ class CurrentStack(QStackedWidget):
     def minimumSizeHint(self):
         w = self.currentWidget()
         return w.minimumSizeHint() if w is not None else super().minimumSizeHint()
+
+
+def movie_from_file(path: Path | str):
+    """A QMovie playing a GIF from memory: the file is read once and never held open, so it can be deleted or
+    replaced while it plays (Windows refuses to delete an open file)."""
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+    from PySide6.QtGui import QMovie
+
+    data = QByteArray(Path(path).read_bytes())
+    movie = QMovie()
+    buf = QBuffer(movie)  # owned by the movie: freed with it
+    buf.setData(data)
+    buf.open(QIODevice.OpenModeFlag.ReadOnly)
+    movie.setDevice(buf)
+    return movie

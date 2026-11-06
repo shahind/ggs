@@ -314,3 +314,22 @@ def test_rig_key_changes_when_pieces_are_edited(tmp_path, qapp):
     st = (tmp_path / "parts.png").stat()
     os.utime(tmp_path / "parts.png", ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
     assert rig_key(tmp_path / "character.yaml") != before
+
+
+def test_a_playing_gif_can_be_deleted(qapp, tmp_path):
+    from PIL import Image
+    from PySide6.QtWidgets import QLabel
+
+    from ggs.ui.widgets import movie_from_file
+
+    gif = tmp_path / "preview.gif"
+    frames = [Image.new("RGB", (16, 16), c) for c in ("red", "blue")]
+    frames[0].save(gif, save_all=True, append_images=frames[1:], duration=50, loop=0)
+    label = QLabel()
+    movie = movie_from_file(gif)
+    label.setMovie(movie)
+    movie.start()
+    qapp.processEvents()
+    assert movie.frameCount() == 2
+    gif.unlink()  # Windows refuses this while a file is open
+    assert not gif.exists()

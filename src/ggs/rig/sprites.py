@@ -284,7 +284,8 @@ ANIMATEDIFF = "animatediff-sd15"
 ONE_TO_ALL = "one-to-all-1.3b"
 AD_SIZE = (384, 512)
 O2A_MIN_FRAMES = 17
-O2A_SIZE = (384, 576)  # w, h: multiples of 16, short side 384 as One-to-All's 1.3B inference uses
+O2A_SIZE = (384, 576)  # portrait; a motion wider than tall gets (576, 384)
+O2A_PAD = 0.12  # standing heights  # w, h: multiples of 16, short side 384 as One-to-All's 1.3B inference uses
 
 
 def _crop_frames(rgba: list, size: tuple[int, int], pad: int = 4):
@@ -305,29 +306,107 @@ def o2a_frame_count(n: int) -> int:
     return max(O2A_MIN_FRAMES, 4 * math.ceil(max(n - 1, 4) / 4) + 1)
 
 
-def o2a_inputs(d: Path, clip, n: int):
-    """One-to-All's inputs for a character item and a clip: (reference on white, its pose image, pose images of
-    4k+1 frames, which of them to keep for ``n`` frames). The design stands on the canvas's ground line; the
-    clip's skeleton has the design's proportions and its mean hip height where the design's hips are."""
+def match_colours(frames: list, reference) -> list:
+    """The character's colours in every frame mapped onto the design's (per-channel histogram matching of the
+    opaque pixels). Pose-driven video models drift in hue and brightness; this keeps the design's palette.
+    PIL RGBA in and out; transparency is left as it is."""
+    import numpy as np
     from PIL import Image
 
-    from ggs.items import design_dir
+    ref = np.asarray(reference.convert("RGBA"))
+    ref_px = ref[..., :3][ref[..., 3] >= 128]
+    if len(ref_px) < 100:
+        return frames
+    targets = []
+    for c in range(3):
+        vals, counts = np.unique(ref_px[:, c], return_counts=True)
+        targets.append((vals, np.cumsum(counts) / counts.sum()))
+    out = []
+    for fr in frames:
+        a = np.asarray(fr.convert("RGBA")).copy()
+        on = a[..., 3] >= 128
+        if on.sum() < 100:
+            out.append(fr)
+            continue
+        vis = a[..., 3] > 0
+        for c, (vals, cdf) in enumerate(targets):
+            src = a[..., c][on]
+            sv, sc = np.unique(src, return_counts=True)
+            scdf = np.cumsum(sc) / sc.sum()
+            lut = np.interp(np.arange(256), sv, scdf)  # the frame's own CDF for every level
+            mapped = np.interp(lut, cdf, vals)
+            a[..., c][vis] = np.clip(mapped[a[..., c][vis]], 0, 255).round().astype(np.uint8)
+        out.append(Image.fromarray(a, "RGBA"))
+    return out
+
+
+def _silhouette(points: dict, widths: dict, size: tuple[int, int], head_r: float):
+    """A grey body shape for one pose: a capsule per bone at its width, a disc for the skull (RGB on black)."""
+    import cv2
+    import numpy as np
+    from PIL import Image
+
+    w, h = size
+    img = np.zeros((h, w, 3), np.uint8)
+    for b, ((x0, y0), (x1, y1)) in points.items():
+        r = max(2, round(widths.get(b, 4.0)))
+        if b == "head":
+            t = 0.62
+            cv2.circle(img, (int(x0 + t * (x1 - x0)), int(y0 + t * (y1 - y0))), max(3, int(head_r)), (150, 150, 150),
+                       -1, cv2.LINE_AA)
+            r = max(2, round(0.45 * head_r))  # the neck (the head's own width is its hat or hair)
+        cv2.line(img, (int(x0), int(y0)), (int(x1), int(y1)), (150, 150, 150), 2 * r, cv2.LINE_AA)
+    return Image.fromarray(img)
+
+
+def o2a_inputs(d: Path, clip, n: int, pose_style: str = "skeleton"):
+    """One-to-All's inputs for a character item and a clip: (reference on white, its pose image, pose images of
+    4k+1 frames, which of them to keep for ``n`` frames, canvas size).
+
+    The canvas fits the whole motion, not only the standing design: every pose of the clip (in the design's
+    proportions, in place) is measured first; a motion wider than tall (a fall, a roll) gets a landscape canvas,
+    and the scale is chosen so nothing leaves the picture. ``pose_style``: "skeleton" (One-to-All's pose
+    drawing), "silhouette" (a grey body shape) or "both"."""
+    from PIL import Image
+
+    from ggs.items import CharacterSettings, design_dir
     from ggs.pipeline.one_to_all import draw_pose
     from ggs.rig.pose import bone_defs, pose_bones
     from ggs.rig.poses import rig_for
     from ggs.rig.stick import openpose_points
-    from ggs.rig.warp import design_skeleton
+    from ggs.rig.warp import body_widths, design_skeleton
 
-    w, h = O2A_SIZE
     rig = rig_for("side")
     _, joints, hp = design_skeleton(d)
     design = Image.open(design_dir(d) / "design.png").convert("RGBA")
     ground = max(max(s[1], e[1]) for b, (s, e) in joints.items() if b.startswith("foot"))
     feet = max(design.getchannel("A").getbbox()[3], ground)
     root = joints["pelvis"][0]
-    k = 0.8 * h / hp  # canvas px per design px: the standing height fills 80% of the canvas
-    gy = 0.93 * h  # the ground line in the canvas
-    ox, oy = w / 2 - root[0] * k, gy - feet * k
+    # One-to-All draws 4k+1 frames; at 13 or fewer the picture greys out after a few frames (measured on the
+    # owner's character: 13 fade, 17 / 25 / 33 hold), so it always draws at least O2A_MIN_FRAMES
+    m = o2a_frame_count(n)
+    idx = frame_indices(clip, m)
+    lengths = _design_lengths(d)
+    posed = [pose_bones(bone_defs(rig), clip, f, lengths, 1.0, True) for f in idx]
+    # extent in standing heights (x from the hips, y from the ground), the design's own outline included
+    bb = design.getchannel("A").getbbox()
+    xs = [(bb[0] - root[0]) / hp, (bb[2] - root[0]) / hp]
+    ys = [(bb[1] - feet) / hp, 0.0]
+    for p in posed:
+        for s_, e in p.values():
+            xs += [s_[0], e[0]]
+            ys += [s_[1], e[1]]
+    pad = O2A_PAD  # head, hands and feet reach past their joints
+    x0, x1, y0, y1 = min(xs) - pad, max(xs) + pad, min(ys) - pad, max(ys) + 0.03
+    def fit(wh):  # canvas px per standing height that keeps every pose inside a canvas of this shape
+        return min(0.86 * wh[1] / (y1 - y0), 0.92 * wh[0] / (x1 - x0), 0.8 * wh[1])
+
+    w, h = max((O2A_SIZE, O2A_SIZE[::-1]), key=fit)  # tall, or wide for a fall or a roll: the larger character
+    unit = fit((w, h))
+    cx = w / 2 - (x0 + x1) / 2 * unit
+    gy = h / 2 - (y0 + y1) / 2 * unit  # y of the ground line
+    k = unit / hp  # canvas px per design px
+    ox, oy = cx - root[0] * k, gy - feet * k
 
     def to_canvas(p):
         return (ox + p[0] * k, oy + p[1] * k)
@@ -335,28 +414,33 @@ def o2a_inputs(d: Path, clip, n: int):
     ref = Image.new("RGB", (w, h), "white")
     small = design.resize((max(1, round(design.width * k)), max(1, round(design.height * k))), Image.LANCZOS)
     ref.paste(small, (round(ox), round(oy)), small)
-    ref_pose = draw_pose(openpose_points({b: (to_canvas(s), to_canvas(e)) for b, (s, e) in joints.items()}, "side"),
-                         (w, h))
-    # One-to-All draws 4k+1 frames; at 13 or fewer the picture greys out after a few frames (measured on the
-    # owner's character: 13 fade, 17 / 25 / 33 hold), so it always draws at least O2A_MIN_FRAMES
-    m = o2a_frame_count(n)
-    idx = frame_indices(clip, m)
-    lengths = _design_lengths(d)
-    unit = hp * k  # canvas px per standing height
-    root_y = sum(clip.root.y) / len(clip.root.y)
+    widths = {}
+    if pose_style != "skeleton":
+        info = json.loads((design_dir(d) / "design.json").read_text(encoding="utf-8"))
+        cs = CharacterSettings(**(info["drawing"].get("character") or {}))
+        widths = {b: v * k for b, v in body_widths(rig, cs, joints, hp).items()}
+
+    def pose_image(pj: dict):
+        if pose_style == "skeleton":
+            return draw_pose(openpose_points(pj, "side"), (w, h))
+        sil = _silhouette(pj, widths, (w, h), 0.075 * unit)
+        if pose_style == "silhouette":
+            return sil
+        sk = draw_pose(openpose_points(pj, "side"), (w, h))
+        return Image.composite(sk, sil, sk.convert("L").point(lambda v: 255 if v > 8 else 0))
+
+    ref_pose = pose_image({b: (to_canvas(s), to_canvas(e)) for b, (s, e) in joints.items()})
     poses = []
-    for f in idx:
-        p = pose_bones(bone_defs(rig), clip, f, lengths, 1.0, True)
-        # the clip's mean hip height stands where the design's hips are
-        pj = {b: ((w / 2 + s_[0] * unit, to_canvas(root)[1] + (s_[1] - root_y) * unit),
-                  (w / 2 + e[0] * unit, to_canvas(root)[1] + (e[1] - root_y) * unit)) for b, (s_, e) in p.items()}
-        poses.append(draw_pose(openpose_points(pj, "side"), (w, h)))
+    for p in posed:
+        pj = {b: ((cx + s_[0] * unit, gy + s_[1] * unit), (cx + e[0] * unit, gy + e[1] * unit))
+              for b, (s_, e) in p.items()}
+        poses.append(pose_image(pj))
     keep = [round(i * (m - 1) / max(n - 1, 1)) for i in range(n)] if n < m else list(range(m))
-    return ref, ref_pose, poses, keep
+    return ref, ref_pose, poses, keep, (w, h)
 
 
 def _one_to_all_frames(d: Path, info: dict, clip, n: int, seed: int, profile: str, enforce_vram: bool,
-                       motion: str = ""):
+                       motion: str = "", pose_style: str = "skeleton"):
     """(RGBA frames cropped to one box, anchor, pose strip) drawn by One-to-All: the design as the reference,
     the clip's skeleton in the design's proportions (``o2a_inputs``)."""
     from PIL import Image
@@ -367,8 +451,7 @@ def _one_to_all_frames(d: Path, info: dict, clip, n: int, seed: int, profile: st
     from ggs.pipeline.one_to_all import OneToAllFrames
     from ggs.pipeline.vram import Stages
 
-    w, h = O2A_SIZE
-    ref, ref_pose, poses, keep = o2a_inputs(d, clip, n)
+    ref, ref_pose, poses, keep, (w, h) = o2a_inputs(d, clip, n, pose_style)
     who = "; ".join(info.get("text") or ["a character"])
     doing = f", {motion}" if motion else ""
     prompt = (f"{who}{doing}, full body, side view, facing right, 2d game character, plain white background, "
@@ -380,6 +463,9 @@ def _one_to_all_frames(d: Path, info: dict, clip, n: int, seed: int, profile: st
     rgb = [rgb[i] for i in keep]
     alphas = BiRefNetMatter(resolve_matting("birefnet", spec_file=spec)).alphas(rgb, stages)
     rgba = [Image.fromarray(real_rgba(im, a)[0], "RGBA") for im, a in zip(rgb, alphas, strict=True)]
+    from ggs.items import design_dir
+
+    rgba = match_colours(rgba, Image.open(design_dir(d) / "design.png"))  # keep the design's palette
     frames, anchor = _crop_frames(rgba, (w, h))
     strip = Image.new("RGB", (w // 2 * len(keep), h // 2))
     for i, j in enumerate(keep):
@@ -464,7 +550,7 @@ def _animatediff_frames(d: Path, info: dict, clip, n: int, seed: int, profile: s
 
 def make_frames(project: Path, ref: str, clip_path: str | Path, *, frames: int = 8, seeds: list[int] | None = None,
                 profile: str = "lite", enforce_vram: bool = True, name: str | None = None,
-                method: str = "auto") -> tuple[Path, list]:
+                method: str = "auto", pose_style: str = "skeleton") -> tuple[Path, list]:
     """A character item's accepted design drawn in ``frames`` poses of a clip (all in one sheet, so they stay
     alike). Writes ``<item>/frames/<name>/``: frames/, <name>.png (APNG), <name>.webp, <name>_sheet.png + .json,
     poses.png and report.json. Returns (folder, results best first)."""
@@ -524,7 +610,7 @@ def make_frames(project: Path, ref: str, clip_path: str | Path, *, frames: int =
         if method == "one_to_all":
             progress.start("frames:one_to_all", ["encode", "animate", "matte"])
             fr, anchor, strip = _one_to_all_frames(d, info, clip, min(frames, 33), seed, profile, enforce_vram,
-                                                   motion)
+                                                   motion, pose_style)
         else:
             progress.start("frames:animatediff", ["animate", "matte"])
             fr, anchor, strip = _animatediff_frames(d, info, clip, min(frames, 16), seed, profile, enforce_vram,

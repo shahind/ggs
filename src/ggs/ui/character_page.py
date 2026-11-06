@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 from ggs.ui import commands as C
 from ggs.ui.icons import set_icon
 from ggs.ui.jobs import Job, run_on_stage
-from ggs.ui.widgets import CurrentStack, ImageStage
+from ggs.ui.widgets import CurrentStack, ImageStage, movie_from_file
 
 ROW = 256
 ENGINE_FORMATS = [("Godot", "godot"), ("Unity", "unity"), ("Defold", "defold"), ("Parts + JSON", "rig")]
@@ -339,7 +339,7 @@ class Movie(QLabel):
             self.setMovie(None)
             self.setText(text)
             return
-        self.movie = QMovie(str(gif))
+        self.movie = movie_from_file(gif)
         self.setMovie(self.movie)
         self.movie.start()
 
