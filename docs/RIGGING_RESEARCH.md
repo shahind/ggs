@@ -106,3 +106,24 @@ for any image model) and paid services (Layer.ai's Spine/Live2D parts-sheet tool
   - GGS now always draws at least 17 frames and keeps the number asked for.
   - Walk and punch, 12 frames each: about 245 s per clip, 6.8 GB peak. The design is kept, and the walk and the
     jab follow the clip; fists blur a little at the punch's peak.
+
+## Layered output instead of a sheet (owner, 2026-11-05 night)
+The owner's idea: get the character from the model already as layers (body parts separate, hidden parts
+complete), usable by both the warp (one connected mesh per layer) and the cut-out. Hand-made template sheets
+are not practical to prepare.
+
+| Model | What it outputs | Released? | Licence | Fit |
+|---|---|---|---|---|
+| Bunraku (arXiv 2607.27348, Jul 2026) | from one illustration: ordered RGBA layers (8 classes / 32 subclasses), hidden parts completed, a mesh per layer and keypose deformations, i.e. a Live2D-style rig | **no**: the repo holds only a README (no code, weights or licence); dataset by request | paper CC BY-NC-SA | the ideal target, not usable yet |
+| See-through (SIGGRAPH 2026) | from one image: up to 23 semantic layers (hair, face, clothing, limbs...), hidden parts inpainted, draw order from depth, PSD | **yes** | code Apache-2.0; weights openrail++ (commercial allowed with use restrictions) | the usable one today. Anime-trained and mostly front-facing; limbs come as whole layers (thigh+shin), which GGS can split at the known knee joint because the layer is complete |
+| Qwen-Image-Layered (Dec 2025) | an image into N RGBA layers (by depth/objects, not body parts) | yes | Apache-2.0 | 20B, generic layers; Bunraku fine-tuned it on ~10K Live2D models we do not have |
+| OmniPSD, PSDiffusion, ART+ | posters: foreground / midground / background layers | partly | OmniPSD on FLUX.1-dev (non-commercial) | not characters |
+
+No model generates a layered character from a prompt directly. The practical pipeline:
+1. The prompt draws the design (klein, in the capture pose).
+2. See-through splits it into complete layers.
+3. GGS maps the layers to bones and splits limb layers at the fitted joints.
+4. The rig is built from the layers: per-layer meshes for the warp, pieces for the cut-out.
+
+Risk to test first: side-view, full-body, non-anime drawings (See-through's training data is anime Live2D, mostly
+front-facing).
