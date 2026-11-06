@@ -88,3 +88,14 @@ for any image model) and paid services (Layer.ai's Spine/Live2D parts-sheet tool
 - Size versus One-to-All 1.3B: SVD-xt U-Net about 1.5B parameters, download about 8 GB in all. Wan2.1 1.3B is a
   smaller network, but its umT5-xxl text encoder adds 6-11 GB of download; VRAM is similar if the text encoder
   is streamed as GGS does for klein.
+
+## Built (2026-11-05, evening)
+- **Slicer, hidden parts:** each piece now gets its full shape where a part in front covered it (`hidden_shape` in
+  `ggs.rig.cutter`): limbs along the bone at their width, torso and hip inside their own outline. The klein
+  refiner paints those areas on every slicing, keeping visible pixels exact. On the earlier boy test copy the
+  chest and hip under the near arm and thigh came out complete; 6 pieces took 7 min 48 s on the 8 GB laptop.
+  Still to do: a better body-part segmentation (See-through's SAM-HQ parser) for the regions themselves.
+- **Generated Frames: One-to-All 1.3B** (`ggs.pipeline.one_to_all`, code vendored in `ggs.third_party.one_to_all`).
+  The design on a 384x576 canvas, the clip's skeleton in the design's proportions drawn in One-to-All's pose
+  style, 4k+1 frames, 30 steps with reference and pose guidance, matted with BiRefNet. umT5 is streamed and its
+  embeddings cached per prompt. Default method when its models are downloaded (`frames_o2a` pack, 18 GB).
