@@ -35,10 +35,27 @@ class MotionError(ValueError):
     pass
 
 
+def tidy_text(text: str) -> str:
+    """A sentence as Kimodo sanitises it before asking its text encoder (single spaces, capital first letter,
+    final punctuation), so the embedding GGS computes is found under the same text."""
+    t = " ".join(text.split())
+    while t and not t[0].isalnum():
+        t = t[1:]
+    while t and not t[-1].isalnum() and t[-1] not in ".!?\"])'":
+        t = t[:-1]
+    if not t:
+        return t
+    t = t.capitalize()
+    return t if t[-1] in ".!?" else t + "."
+
+
 def split_prompt(prompt: str) -> list[str]:
-    """Sentences of a prompt, each ending in '.', as Kimodo's command line splits them."""
-    texts = [t.strip() for t in prompt.replace("\n", " ").split(".")]
-    texts = [t + "." for t in texts if t]
+    """Sentences of a prompt (split after '.', '!' or '?'), each tidied the way Kimodo will see it."""
+    import re
+
+    parts = re.split(r"(?<=[.!?])\s+|\n+", prompt.strip())
+    texts = [tidy_text(t) for t in parts if t.strip(" .!?")]
+    texts = [t for t in texts if t]
     if not texts:
         raise MotionError("the motion prompt is empty")
     return texts
@@ -151,9 +168,22 @@ class _CachedText:
         import torch
 
         texts = [texts] if isinstance(texts, str) else list(texts)
-        rows = [self.embeds[t] if t.strip() else torch.zeros(4096) for t in texts]
+        rows = [self._lookup(t) if t.strip() else torch.zeros(4096) for t in texts]
         feat = torch.stack(rows)[:, None].to(self.device)
         return feat, [1] * len(texts)
+
+    def _lookup(self, text: str):
+        """The embedding for ``text``, matched loosely (Kimodo may re-case or re-punctuate a sentence)."""
+        if text in self.embeds:
+            return self.embeds[text]
+
+        def key(t: str) -> str:
+            return " ".join("".join(c.lower() if c.isalnum() else " " for c in t).split())
+
+        found = {key(k): v for k, v in self.embeds.items()}
+        if key(text) in found:
+            return found[key(text)]
+        raise MotionError(f"no text embedding for {text!r} (have: {list(self.embeds)})")
 
     def to(self, *a, **k):
         return self
