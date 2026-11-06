@@ -26,6 +26,7 @@ gpu = [
   "transformers>=5.0",
   "accelerate",
   "peft",
+  "bitsandbytes>=0.45",  # See-through layer model (4-bit weights)
   "safetensors",
   "gguf",
   "einops",   # BiRefNet remote code

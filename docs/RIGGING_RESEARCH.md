@@ -127,3 +127,25 @@ No model generates a layered character from a prompt directly. The practical pip
 
 Risk to test first: side-view, full-body, non-anime drawings (See-through's training data is anime Live2D, mostly
 front-facing).
+
+## See-through in the slicer (built, 2026-11-06)
+- **Setup:** layer model vendored (`ggs.third_party.see_through`, Apache-2.0 code), wrapped in
+  `ggs.pipeline.layers`. NF4 weights in the optional `layers` pack (3.6 GB, openrail++); needs bitsandbytes.
+  Jones: 412 s at 768 px, 4.6 GB peak.
+- **What it gives:** complete layers. On Jones: both arms as one layer (sleeve to hand), the whole shirt, the
+  whole trousers, face, front and back hair, ears, eyes. In one run the hat and boots got no layer.
+- **Slicing:** after the tries are cut, the best try gets layers (`<try>/layers`, reused on re-cut) and is cut
+  again from them (`ggs.rig.cutter._layered_parts`):
+  - Each layer's pixels go to the nearest of its allowed bones (`LAYER_BONES`): arms are split at shoulder,
+    elbow and wrist; trousers at hip and knee. Far-side bones are penalised (their art is never shown).
+  - A piece is its layers composited back to front, so hidden parts are already drawn.
+  - Across a joint, only the piece drawn underneath continues into its neighbour (same layer's art; strip
+    width from the narrower bone, so a hat-wide head borrows nothing).
+  - Pixels the layers do not reproduce (by colour) keep the drawing's colour and go with the nearest explained
+    pixel: the hat with the hair, a collar with the shirt. A bone no layer drew (boots) takes what lies nearest
+    to it.
+  - The layered cut is kept only when it validates at least as well as the plain cut. The klein hidden-area
+    painting is skipped when it is kept.
+- **Jones:** passes, 0.904–0.910. The head piece is clean (hat, face, neck, no shirt) and the shirt is whole.
+  Still rough: pointed overlap ends on the leg pieces, a notch at the back of the shoulder, a sliver above the
+  upper arm.

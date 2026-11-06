@@ -30,6 +30,9 @@ SLICE_PROMPT = (
 )
 
 
+LAYERS = "see-through-layers"  # pose-section model that splits a character into complete layers
+
+
 class SliceTemplate(BaseModel):
     id: str
     label: str
@@ -276,7 +279,7 @@ def make_slices(project: Path, ref: str, template: str = "side_simple", *, layou
         style, weight = f"{meta.trigger}, ", drawing.get("style_weight") or meta.recommended_weight
     seeds = seeds or [drawing["seed"] + i for i in range(3)]
     view_words = "side view facing right" if side else "front view facing the viewer, symmetrical T-pose"
-    progress.start(f"slices:{model}", ["encode", "denoise", "matte", "joints", "cut", "denoise"] +
+    progress.start(f"slices:{model}", ["encode", "denoise", "matte", "joints", "cut", "layers", "cut", "denoise"] +
                    (["matte"] if t.refine else []))
     recipe = load_recipe("sprite")
     gen, matter = build_backends(recipe, model, profile)
@@ -392,16 +395,59 @@ def recut_slices(project: Path, ref: str, layout) -> SliceResult:
                       get_template(info.get("template", "side_simple")), bool(fitted), stages, refine=False)
 
 
+def _layer_try(best: Path, rig, name: str, stages) -> bool:
+    """See-through's complete layers for the chosen try (saved in ``<try>/layers``), and the try cut again from
+    them. Kept only when it validates at least as well as the plain cut; otherwise the plain cut stays."""
+    import numpy as np  # noqa: F401 - loaded with the layers
+    from PIL import Image
+
+    from ggs.pipeline.layers import SeeThroughLayers, save_layers
+    from ggs.pipeline.models import MissingModelError, resolve_pose
+    from ggs.rig.make import cut_master
+    from ggs.rig.master import load_master
+
+    try:
+        files = {"model": resolve_pose(LAYERS)}
+    except (MissingModelError, ValueError):
+        return False
+    folder = best.parent
+    master_json = folder / "master.json"
+    before = json.loads((best / "validation.json").read_text(encoding="utf-8"))
+    lay_dir = folder / "layers"
+    if not any(lay_dir.glob("*.png")):  # made once per try; re-applying a layout reuses them
+        _spec, master, _labels = load_master(master_json)
+        layers = SeeThroughLayers(files).decompose(Image.fromarray(master, "RGBA"), stages)
+        save_layers(layers, lay_dir)
+    trial = folder / "character_layers"
+    if trial.exists():
+        shutil.rmtree(trial)
+    with stages.stage("cut"):
+        outcome = cut_master(master_json, rig, trial, name)
+    good = outcome.character is not None and (outcome.report.passed or not before.get("passed")) and \
+        outcome.report.score >= float(before.get("score", 0)) - 0.02
+    if good:
+        shutil.rmtree(best)
+        trial.rename(best)
+    else:
+        shutil.rmtree(trial, ignore_errors=True)
+        shutil.rmtree(lay_dir)  # a later re-cut must not pick up layers that did worse
+    print(f"layers: {'used' if good else 'not used'} (score {outcome.report.score:.3f} vs "
+          f"{float(before.get('score', 0)):.3f})")
+    return good
+
+
 def _cut_tries(project, rec, d, out, masters, rig, lay, measures, t, fitted, stages, *, refine: bool,
-               model: str = "", profile: str = "lite", enforce_vram: bool = True) -> SliceResult:
+               model: str = "", profile: str = "lite", enforce_vram: bool = True, layers: bool = True) -> SliceResult:
     from ggs.rig.make import cut_master
 
     tries, best = [], None
     cut_rig = rig
+    rigs = {}
     with stages.stage("cut"):  # CPU: cut every try into pieces and check it (the longest part after drawing)
         for sd, folder, master in masters:
             if lay is not None and fitted:
                 cut_rig = layout_master(master, rig, lay)
+            rigs[folder] = cut_rig
             if (folder / "character").exists():
                 shutil.rmtree(folder / "character")
             outcome = cut_master(master, cut_rig, folder / "character", rec.name)
@@ -415,11 +461,22 @@ def _cut_tries(project, rec, d, out, masters, rig, lay, measures, t, fitted, sta
         usable = [x for x in tries if x["cut"] and x["score"] >= ROUGH_IOU]
         if usable:
             best, rough = Path(max(usable, key=lambda x: x["score"])["folder"]) / "character", True
-    if best is not None and refine:  # paint the hidden areas (always); draw expressions for the detailed template
+    layered = False
+    if best is not None and fitted and layers:  # complete layers for the chosen try, then cut it again from them
+        cut_rig = rigs.get(best.parent, cut_rig)
+        layered = _layer_try(best, cut_rig, rec.name, stages)
+        if layered:
+            row = next(x for x in tries if Path(x["folder"]) == best.parent)
+            report = json.loads((best / "validation.json").read_text(encoding="utf-8"))
+            row.update(passed=bool(report.get("passed")), score=round(float(report.get("score", 0)), 4),
+                       layered=True)
+            rough = rough and not row["passed"]
+    if best is not None and refine and (t.refine or not layered):
+        # paint the hidden areas (not needed when the layers are whole); expressions for the detailed template
         from ggs.rig.refine import RefineSettings, refine_characters
 
-        refine_characters([best], cut_rig, model=model, profile=profile, enforce_vram=enforce_vram,
-                          settings=RefineSettings(expressions=t.refine))
+        refine_characters([best], rigs.get(best.parent, cut_rig), model=model, profile=profile,
+                          enforce_vram=enforce_vram, settings=RefineSettings(expressions=t.refine, fills=not layered))
     for f in out.glob("*"):  # replace the previous sliced version (the work folder stays)
         if f.name != "work":
             shutil.rmtree(f) if f.is_dir() else f.unlink()

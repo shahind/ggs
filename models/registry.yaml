@@ -147,6 +147,18 @@ entries:
     source: https://huggingface.co/Lykon/dreamshaper-8
     notes: "OpenRAIL-M (use restrictions, commercial use of outputs allowed). Base for AnimateDiff frames."
 
+  - id: see-through-layerdiff3d-nf4
+    kind: component
+    name: See-through LayerDiff 3D (NF4), character layer decomposition
+    license: openrail++ (Apache-2.0 code)
+    commercial: "yes"
+    min_vram_gb: 5
+    source: https://huggingface.co/24yearsold/seethroughv0.0.2_layerdiff3d_nf4
+    notes: "See-through (SIGGRAPH 2026, github.com/shitagaki-lab/see-through, Apache-2.0; inference vendored in
+      src/ggs/third_party/see_through). Weights: 'Commercial use is permitted' with the Open RAIL use restrictions,
+      which must be passed on to users (derived from SDXL, Animagine XL 4.0, LayerDiffuse). Needs bitsandbytes.
+      Jones (8 GB laptop): 412 s at 768 px, 4.6 GB peak."
+
   - id: one-to-all-1.3b
     kind: component
     name: One-to-All Animation 1.3B (v2 checkpoint, Wan2.1-T2V-1.3B based)

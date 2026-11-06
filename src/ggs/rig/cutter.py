@@ -291,7 +291,7 @@ def move_back_accessories(labels: np.ndarray, guide_labels: np.ndarray, spec: Ma
 
 
 def cut_parts(master: np.ndarray, guide_labels: np.ndarray, spec: MasterSpec, rig: RigSpec,
-              draw_order: list[str] | None = None) -> CutResult:
+              draw_order: list[str] | None = None, layers: dict | None = None) -> CutResult:
     if master.shape[:2] != guide_labels.shape:
         raise CutError("master and guide labels differ in size")
     raw = master_labels(master, guide_labels)
@@ -309,6 +309,8 @@ def cut_parts(master: np.ndarray, guide_labels: np.ndarray, spec: MasterSpec, ri
     from ggs.rig.joints import ink_mask
 
     ink = ink_mask(rgb, alpha >= 128)
+    if spec.fit and layers:  # complete layers from See-through: pieces from whole art, split at the joints
+        return CutResult(labels, _layered_parts(master, labels, layers, spec, rig, draw_order), moved, labels != raw)
     if spec.fit:  # joints found in the drawing: clean cuts (straight at the joints, real art overlapping)
         return CutResult(labels, _clean_parts(master, labels, spec, rig, draw_order, ink), moved, labels != raw)
     parts: dict[str, CutPart] = {}
@@ -449,6 +451,127 @@ def _clean_parts(master: np.ndarray, labels: np.ndarray, spec: MasterSpec, rig: 
         w = 2.0 * widths.get(p.bone, 8.0)
         parts[p.name] = CutPart(p, out, own, int(hidden.sum()), angle, (sx, sy), length,
                                 {"start": w, "end": w}, hidden)
+    return parts
+
+
+# See-through layer tag -> the bones its pixels may go to (by name prefix); a layer whose bones are missing
+# from the rig falls back to every bone
+LAYER_BONES = {
+    "front hair": ("head", "neck", "hair_back"), "back hair": ("head", "neck", "hair_back"),
+    "head": ("head", "neck"), "headwear": ("head",), "face": ("head",), "irides": ("head",),
+    "eyebrow": ("head",), "eyewhite": ("head",), "eyelash": ("head",), "eyewear": ("head",), "ears": ("head",),
+    "earwear": ("head",), "nose": ("head",), "mouth": ("head",), "neck": ("neck", "head"),
+    "neckwear": ("chest", "torso", "neck", "head"),
+    "topwear": ("chest", "torso", "waist", "pelvis", "upper_arm", "cape", "skirt"),
+    "handwear": ("upper_arm", "forearm", "hand"),
+    "bottomwear": ("pelvis", "waist", "skirt", "thigh", "shin"), "legwear": ("pelvis", "thigh", "shin", "skirt"),
+    "footwear": ("foot", "shin"),
+}
+FAR_PENALTY = 1.35
+# back to front inside one piece (See-through's layers overlap: the face sits on the head, the hair on the face)
+LAYER_ORDER = ["back hair", "tail", "wings", "neck", "head", "face", "ears", "earwear", "nose", "mouth", "eyewhite",
+               "irides", "eyelash", "eyebrow", "eyewear", "front hair", "headwear", "bottomwear", "legwear",
+               "footwear", "topwear", "neckwear", "handwear", "objects"]
+
+
+def _layered_parts(master: np.ndarray, labels: np.ndarray, layers: dict, spec: MasterSpec, rig: RigSpec,
+                   draw_order: list[str]) -> dict[str, CutPart]:
+    """Pieces from See-through's complete layers (``ggs.pipeline.layers``).
+
+    - Each layer's opaque pixels go to the nearest of the bones that layer may belong to (``LAYER_BONES``),
+      measured against the bone's width: a whole arm layer is split at the shoulder, elbow and wrist, the
+      trousers at the hip and knee.
+    - A piece is all its layers composited back to front. The layers are whole, so the chest under the arm and
+      the trousers under the shirt are already drawn; nothing is invented.
+    - Across a joint, a piece continues a little into its neighbour with the same layer's art (OVERLAP).
+    - Pixels of the drawing the layers do not reproduce (See-through can miss a hat) keep their drawn colour and
+      go with the nearest pixel the layers do explain (a hat with the hair, a collar with the shirt)."""
+    from ggs.rig.skin import _seg_dist
+
+    index = {b.name: i for i, b in enumerate(rig.bones)}
+    parent = {b.name: b.parent for b in rig.bones}
+    rank = {n: k for k, n in enumerate(draw_order)}
+    widths = spec.fit.get("widths") or {}
+    h, w = labels.shape
+    yy, xx = np.mgrid[:h, :w].astype(np.float32)
+    pts_all = np.stack([xx.ravel(), yy.ravel()], axis=1)
+    names = [b.name for b in rig.bones if b.name in spec.joints]
+    # far limbs reuse the near limb's art, so their own pixels are never shown: pixels in between (the crotch, the
+    # shoulder) go to the near limb or the trunk
+    dist = {b: (_seg_dist(pts_all, *spec.joints[b]) / max(widths.get(b, 8.0), 3.0)).reshape(h, w)
+            * (FAR_PENALTY if b.endswith("_far") else 1.0) for b in names}
+    order = [t for t in LAYER_ORDER if t in layers] + [t for t in layers if t not in LAYER_ORDER]
+    owner: dict[str, np.ndarray] = {}  # tag -> bone index per pixel (-1: not this layer)
+    for tag in order:
+        a = layers[tag][..., 3] > 16
+        allowed = [b for b in names if any(b == p or b.startswith(p + "_") for p in LAYER_BONES.get(tag, ()))]
+        allowed = allowed or names
+        d = np.stack([dist[b] for b in allowed])
+        own = np.where(a, np.array([index[b] for b in allowed])[np.argmin(d, axis=0)], -1)
+        owner[tag] = own
+    # what the layers show, stacked back to front, and which bone shows at each pixel
+    comp = np.zeros((h, w, 4), np.float32)
+    shown = -np.ones((h, w), np.int64)
+    for tag in order:
+        lay = layers[tag].astype(np.float32) / 255.0
+        a = lay[..., 3:4]
+        comp[..., :3] = lay[..., :3] * a + comp[..., :3] * (1 - a)
+        comp[..., 3:] = a + comp[..., 3:] * (1 - a)
+        shown = np.where(lay[..., 3] > 0.5, owner[tag], shown)
+    opaque = master[..., 3] >= 128
+    # pixels of the drawing the layers do not reproduce: none covers them, or one shows something else there
+    # (See-through can draw the whole hair under a hat it missed)
+    diff = np.abs(comp[..., :3] * 255.0 - master[..., :3].astype(np.float32)).max(axis=2)
+    explained = opaque & (comp[..., 3] > 0.5) & (diff < 70) & (shown >= 0)
+    residual = opaque & ~explained
+    res_bone = -np.ones((h, w), np.int64)
+    if residual.any() and explained.any():  # each goes with the nearest pixel the layers do explain
+        from scipy import ndimage
+
+        _, (iy, ix) = ndimage.distance_transform_edt(~explained, return_indices=True)
+        res_bone = np.where(residual, shown[iy, ix], -1)
+        # a bone no layer drew at all (boots See-through missed): what lies nearest to it, measured by its width
+        missing = [b for b in names if not (shown == index[b]).any()]
+        if missing:
+            near_bone = np.array([index[b] for b in names])[np.argmin(np.stack([dist[b] for b in names]), axis=0)]
+            for b in missing:
+                res_bone = np.where(residual & (near_bone == index[b]), index[b], res_bone)
+    parts: dict[str, CutPart] = {}
+    for p in rig.part_sheet.parts:
+        b = p.bone
+        (sx, sy), (ex, ey) = spec.joints[b]
+        length = math.hypot(ex - sx, ey - sy)
+        angle = bone_angle((sx, sy), (ex, ey))
+        wb = max(widths.get(b, 8.0), 3.0)
+        near = [(parent[b], (sx, sy))] if parent[b] else []
+        near += [(c.name, spec.joints[c.name][0]) for c in rig.bones if c.parent == b and c.name in spec.joints]
+        out = np.zeros((h, w, 4), np.float32)
+        mine = np.zeros((h, w), bool)
+        for tag in order:
+            take = owner[tag] == index[b]
+            for nb, (jx, jy) in near:  # a little past the joint, the neighbour's pixels of the same layer,
+                if nb in index and rank.get(b, 0) < rank.get(nb, 0):  # only under a piece drawn over this one
+                    wj = min(wb, max(widths.get(nb, 8.0), 3.0))  # the narrower bone: a hat-wide head borrows
+                    band = (owner[tag] == index[nb]) & (np.hypot(xx - jx, yy - jy) <= (1.0 + OVERLAP) * wj)
+                    take |= band
+            if not take.any():
+                continue
+            lay = layers[tag].astype(np.float32) / 255.0
+            a = np.where(take, lay[..., 3], 0.0)
+            out[..., :3] = lay[..., :3] * a[..., None] + out[..., :3] * (1 - a[..., None])
+            out[..., 3] = a + out[..., 3] * (1 - a)
+            mine |= owner[tag] == index[b]
+        res = residual & (res_bone == index[b])
+        if res.any():  # what no layer drew (a hat): the drawing's own pixels, on top
+            out[res, :3] = master[res, :3] / 255.0
+            out[res, 3] = 1.0
+            mine |= res
+        if mine.sum() < 20:
+            raise CutError(f"part {p.name!r}: the layers gave it almost no pixels")
+        rgba = np.zeros((h, w, 4), np.uint8)
+        rgba[..., 3] = np.clip(out[..., 3] * 255, 0, 255).round().astype(np.uint8)
+        rgba[..., :3] = np.clip(out[..., :3] * 255, 0, 255).round().astype(np.uint8)
+        parts[p.name] = CutPart(p, rgba, mine, 0, angle, (sx, sy), length, {"start": 2 * wb, "end": 2 * wb}, None)
     return parts
 
 

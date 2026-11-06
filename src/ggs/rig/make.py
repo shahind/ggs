@@ -203,7 +203,10 @@ def cut_master(master_json: str | Path, rig: RigSpec, out_dir: str | Path, name:
     out = Path(out_dir)
     try:
         order = spec.fit.get("draw_order") or None  # a skirt: the legs go behind the body
-        cut = cut_parts(master, labels, spec, rig, order)
+        from ggs.pipeline.layers import load_layers
+
+        layers = load_layers(Path(master_json).parent / "layers")  # See-through's complete layers, when made
+        cut = cut_parts(master, labels, spec, rig, order, layers or None)
         sheet = normalize(cut, spec, rig)
     except CutError as exc:  # the master is too far off to cut at all: a rejection, not a crash
         from ggs.rig.validate import Check, Report

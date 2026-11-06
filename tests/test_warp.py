@@ -277,3 +277,45 @@ def test_warp_and_sliced_version_know_when_their_picture_changed(tmp_path):
     assert not sliced_stale(d)
     (d / "item.json").write_text(rec.model_copy(update={"accepted": 3}).model_dump_json(), encoding="utf-8")
     assert sliced_stale(d)
+
+
+def test_layers_give_whole_pieces_split_at_the_joints(rig, guide, tmp_path):
+    """See-through-style layers (whole, overlapping) are cut into pieces at the joints; the torso piece keeps
+    the part the near arm hides, and the result still rebuilds the drawing."""
+    from PIL import Image
+
+    from ggs.pipeline.layers import save_layers
+    from ggs.rig.joints import fit_master
+    from ggs.rig.make import cut_master
+    from ggs.rig.master import save_master
+    from ggs.rig.skin import _capsule
+
+    m = save_master(tmp_path / "m", guide.spec, guide.image, guide)
+    fit_master(m, _kp(guide.spec.joints), rig)
+    img = np.asarray(guide.image.convert("RGBA"))
+    names = [b.name for b in rig.bones]
+    lab = guide.labels
+    widths = bone_widths(lab, rig, guide.spec.joints)
+
+    def layer(bones, whole=False):
+        on = np.isin(lab, [names.index(b) for b in bones])
+        if whole:  # the layer as See-through draws it: complete under whatever is in front
+            for b in bones:
+                on |= _capsule(lab.shape, *guide.spec.joints[b], widths[b])
+        out = np.zeros_like(img)
+        out[on] = img[on]
+        out[on, 3] = 255
+        return out
+
+    layers = {"topwear": layer(["torso"], whole=True), "head": layer(["head"]),
+              "handwear": layer([b for b in names if b.startswith(("upper_arm", "forearm", "hand"))]),
+              "legwear": layer([b for b in names if b.startswith(("pelvis", "thigh", "shin"))]),
+              "footwear": layer([b for b in names if b.startswith("foot")])}
+    save_layers(layers, m.parent / "layers")
+    res = cut_master(m, rig, tmp_path / "c", "Puppet")
+    iou = next(c for c in res.report.checks if c.name == "reassembly_iou").value
+    assert res.character is not None and iou > 0.9, res.report.checks
+    hidden = np.isin(lab, [names.index("upper_arm_near")]) & (layers["topwear"][..., 3] > 0)
+    assert hidden.sum() > 50  # the near arm does cover some of the torso
+    sheet = np.asarray(Image.open(tmp_path / "c" / "parts.png").convert("RGBA"))
+    assert sheet[..., 3].any()

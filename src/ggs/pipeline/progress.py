@@ -24,7 +24,7 @@ from pathlib import Path
 DEFAULT_SECONDS = {  # first run on a machine (measured on the 8 GB laptop, lite profile)
     "start": 8.0, "encode": 25.0, "denoise": 55.0, "decode": 6.0, "matte": 12.0, "latents": 40.0,
     "caption": 90.0, "train": 3600.0, "motion_text": 35.0, "motion": 12.0, "control": 4.0,
-    "cut": 90.0, "joints": 6.0, "animate": 90.0,
+    "cut": 90.0, "joints": 6.0, "animate": 90.0, "layers": 400.0,
 }
 _lock = threading.Lock()
 _active: _Ticker | None = None

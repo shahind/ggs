@@ -37,6 +37,16 @@ packs:
       - repo: mattmdjaga/segformer_b2_clothes
         dir: segformer-b2-clothes
         include: ["*.json", "model.safetensors"]
+  layers:
+    label: Layer splitter (See-through, optional)
+    why: Splits a character into complete layers (arms, shirt, trousers, boots, face, hair) for clean pieces.
+    required: false
+    size_gb: 3.6
+    ready_when: {pose: [see-through-layers]}
+    parts:
+      - repo: 24yearsold/seethroughv0.0.2_layerdiff3d_nf4
+        dir: seethroughv0.0.2_layerdiff3d_nf4
+        include: ["*"]
   frames_o2a:
     label: Frame animator (One-to-All, optional)
     why: Draws a character's animation frame by frame from the design and the animation's skeleton.
