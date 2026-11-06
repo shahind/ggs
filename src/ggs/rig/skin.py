@@ -3,17 +3,16 @@
 For characters without loose clothes or big props this looks better than the cut-out puppet: the drawing stays in
 one piece, elbows and knees bend smoothly, and nothing has to be redrawn.
 
-Built from a drawing whose joints are known (``ggs.rig.joints``):
-- **Layers** back to front: the far arm and leg, the body (pelvis, torso, head), the near leg and arm. A layer's
-  pixels are the ones its bones own; where something in front hid it (the torso behind the near arm, the far leg's
-  top behind the skirt) the hidden area is filled from the layer's own colours, so it can show when the limb
-  moves away.
-- **Mesh**: a triangle grid over each layer. Every vertex follows the nearest bone of its layer rigidly, and blends
-  with the neighbouring bone only close to their joint (a short bending zone at elbows and knees, almost none at
-  shoulders and hips), so sleeves, boots and hands keep their shape.
-- **Frames**: forward kinematics of the clip with the drawing's own bone lengths; each bone's move from the
-  drawing's pose to the frame's pose moves its vertices (linear blend skinning); triangles are drawn layer by layer
-  (near and far swap when the clip says the limbs crossed).
+Built from a drawing whose joints are known (``ggs.rig.joints``). Two modes:
+- **connected** (default, like a puppet warp): one mesh over the whole drawing. Pixels that touch in the drawing
+  stay joined and stretch; nothing is cut out or filled in. Every vertex belongs to the bone nearest to it
+  measured *through the shape* (a hat brim is far from the shoulder) and blends with the next bone near their
+  joint. Where two unrelated parts only meet across empty space (between the legs), the mesh is split in that
+  gap so they move apart. Overlapping triangles are drawn in the rig's order (far limbs behind, near in front).
+- **layers**: separate meshes for the far arm and leg, the body, the near leg and arm, built from the body
+  parsing; areas hidden by a limb are filled with the part's own colour.
+In both, each bone's move from the drawing's pose (the confirmed joints) to the frame's pose moves its vertices
+(linear blend skinning), and triangles are rasterised in numpy and sampled with one OpenCV remap per mesh.
 
 Stored as ``skin.json`` + ``skin.png`` (+ one filled PNG per layer) so exports run without the drawing model.
 """
@@ -42,6 +41,8 @@ JOINT_BLEND = 0.6  # bending zone around an elbow, knee, wrist, ankle, waist or 
 ROOT_BLEND = 0.3  # around a shoulder or hip: a limb turns almost rigidly about it, like a cut-out piece
 TRUNK = ("pelvis", "waist", "torso", "chest")
 ISLAND = 0.15  # a piece of a layer smaller than this share of its main piece goes to its surroundings
+MODE = "connected"  # one mesh over the whole drawing (pixels stay joined); "layers" = separate limb layers
+GEO_RES = 160  # cells per standing height for the through-the-shape distances
 
 
 class SkinError(ValueError):
@@ -102,11 +103,12 @@ def _capsule(shape, p0: Point, p1: Point, r: float) -> np.ndarray:
 
 class SkinRig:
     def __init__(self, rig: RigSpec, image: np.ndarray, joints: Joints, labels: np.ndarray, widths: dict[str, float],
-                 height_px: float, grid: float = GRID):
+                 height_px: float, grid: float = GRID, mode: str = MODE):
         if image.shape[:2] != labels.shape:
             raise SkinError("drawing and labels differ in size")
         self.rig, self.joints, self.widths, self.height_px = rig, joints, widths, float(height_px)
         self.grid = grid
+        self.mode = mode
         self.source = image  # the drawing (uint8 RGBA) the rig was made from
         self.bones = [b.name for b in rig.bones]
         self.index = {n: i for i, n in enumerate(self.bones)}
@@ -126,10 +128,15 @@ class SkinRig:
         alpha = rgba[..., 3]
         from ggs.rig.joints import ink_mask
 
+        self.layers: list[Layer] = []
+        if mode == "connected":
+            self.labels = labels
+            pre = np.dstack([rgba[..., :3] * alpha[..., None], alpha]).astype(np.float32)
+            self.layers.append(self._connected("body", pre, alpha > 0.02))
+            return
         ink = ink_mask(image[..., :3], image[..., 3] > 5)  # outlines: never a fill colour
         labels = tidy_labels(labels, rig, joints, widths)
         self.labels = labels
-        self.layers: list[Layer] = []
         for name, bones in layer_bones(rig):
             ids = [self.index[b] for b in bones]
             own = np.isin(labels, ids) & (alpha > 0.02)
@@ -230,11 +237,116 @@ class SkinRig:
         tri_bone = np.array([self.index[bones[k]] for k in np.argmin(own_d, axis=1)], np.int64)
         return Layer(name, bones, img, verts, tris, full, tri_bone)
 
-    def _joint_weights(self, verts: np.ndarray, bones: list[str], cand: list[str]) -> np.ndarray:
+    def _geodesic(self, mask: np.ndarray):
+        """Distance from every bone, measured inside the drawing's shape (not across empty space), divided by the
+        bone's width: (coarse cell size, cell index map, distances (cells, bones), nearest-cell lookup)."""
+        from scipy import ndimage
+        from scipy.sparse import coo_matrix
+        from scipy.sparse.csgraph import dijkstra
+
+        k = max(1, round(self.height_px / GEO_RES))
+        h, w = mask.shape
+        hs, ws = -(-h // k), -(-w // k)
+        pad = np.zeros((hs * k, ws * k), bool)
+        pad[:h, :w] = mask
+        small = pad.reshape(hs, k, ws, k).any(axis=(1, 3))
+        idx = -np.ones(small.shape, np.int64)
+        n = int(small.sum())
+        idx[small] = np.arange(n)
+        rows, cols, vals = [], [], []
+        for dy, dx in ((0, 1), (1, 0), (1, 1), (1, -1)):
+            a = idx[0:hs - dy, max(0, -dx):ws - max(0, dx)]
+            b = idx[dy:hs, max(0, dx):ws - max(0, -dx)]
+            ok = (a >= 0) & (b >= 0)
+            rows.append(a[ok])
+            cols.append(b[ok])
+            vals.append(np.full(int(ok.sum()), math.hypot(dy, dx)))
+        graph = coo_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))), shape=(n, n)).tocsr()
+        # every cell outside the shape looks up the nearest cell inside it
+        _, (ny, nx) = ndimage.distance_transform_edt(~small, return_indices=True)
+        nearest = idx[ny, nx]
+        dist = np.empty((n, len(self.bones)), np.float32)
+        for j, b in enumerate(self.bones):
+            (sx, sy), (ex, ey) = self.joints[b]
+            t = np.linspace(0.0, 1.0, 24)
+            cy = np.clip(((sy + t * (ey - sy)) // k).astype(np.int64), 0, hs - 1)
+            cx = np.clip(((sx + t * (ex - sx)) // k).astype(np.int64), 0, ws - 1)
+            src = np.unique(nearest[cy, cx])
+            d = dijkstra(graph, directed=False, indices=src, min_only=True)
+            dist[:, j] = np.where(np.isfinite(d), d * k, 1e6) / max(self.widths[b], 1e-3)
+        return k, nearest, dist
+
+    def _connected(self, name: str, img: np.ndarray, mask: np.ndarray) -> Layer:
+        """One mesh over the whole drawing, like a puppet warp: pixels that touch in the drawing stay joined and
+        stretch, nothing is cut out or filled in. Each vertex belongs to the bone nearest to it *through the shape*
+        (a hat brim is far from the shoulder), and blends with the next bone near their joint. Where two unrelated
+        parts only meet across empty space (between the legs, an arm beside the body), the triangles there get
+        their own copy of the vertex, so the parts separate in the gap instead of dragging each other."""
+        import cv2
+
+        step = max(4, round(self.grid * self.height_px))
+        grown = cv2.dilate(mask.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=2).astype(bool)
+        ys, xs = np.nonzero(grown)
+        x0, y0 = (xs.min() // step) * step, (ys.min() // step) * step
+        nx, ny = (xs.max() - x0) // step + 2, (ys.max() - y0) // step + 2
+        cells = np.zeros((ny - 1, nx - 1), bool)
+        cy, cx = (ys - y0) // step, (xs - x0) // step
+        cells[np.clip(cy, 0, ny - 2), np.clip(cx, 0, nx - 2)] = True
+        vid = -np.ones((ny, nx), np.int64)
+        verts, tris = [], []
+
+        def v(i: int, j: int) -> int:
+            if vid[i, j] < 0:
+                vid[i, j] = len(verts)
+                verts.append((x0 + j * step, y0 + i * step))
+            return int(vid[i, j])
+
+        for i, j in zip(*np.nonzero(cells)):
+            a, b, c, d = v(i, j), v(i, j + 1), v(i + 1, j + 1), v(i + 1, j)
+            tris += [(a, b, c), (a, c, d)]
+        verts = np.array(verts, np.float32)
+        tris = np.array(tris, np.int64)
+
+        k, nearest, dist = self._geodesic(mask)
+        hs, ws = nearest.shape
+
+        def owner_at(pts: np.ndarray) -> np.ndarray:
+            yy = np.clip((pts[:, 1] // k).astype(np.int64), 0, hs - 1)
+            xx = np.clip((pts[:, 0] // k).astype(np.int64), 0, ws - 1)
+            return np.argmin(dist[nearest[yy, xx]], axis=1)
+
+        v_own = owner_at(verts)
+        t_own = owner_at(verts[tris].mean(axis=1))
+        related = np.eye(len(self.bones), dtype=bool)
+        for b, p in self.parent.items():
+            if p is not None:
+                related[self.index[b], self.index[p]] = related[self.index[p], self.index[b]] = True
+        copies: dict[tuple[int, int], int] = {}
+        extra_pts, extra_own = [], []
+        vy = np.clip(np.round(verts[:, 1]).astype(np.int64), 0, mask.shape[0] - 1)
+        vx = np.clip(np.round(verts[:, 0]).astype(np.int64), 0, mask.shape[1] - 1)
+        empty = ~mask[vy, vx]  # only a vertex on empty space may be split; inside the art everything stays joined
+        for t, o in zip(*np.nonzero(~related[t_own[:, None], v_own[tris]] & empty[tris])):
+            vi, bo = int(tris[t, o]), int(t_own[t])
+            key = (vi, bo)
+            if key not in copies:
+                copies[key] = len(verts) + len(extra_pts)
+                extra_pts.append(verts[vi])
+                extra_own.append(bo)
+            tris[t, o] = copies[key]
+        if extra_pts:
+            verts = np.vstack([verts, np.array(extra_pts, np.float32)])
+            v_own = np.concatenate([v_own, np.array(extra_own, np.int64)])
+        w = self._joint_weights(verts, self.bones, self.bones, near=v_own)
+        return Layer(name, list(self.bones), img, verts, tris, w.astype(np.float32), t_own.astype(np.int64))
+
+    def _joint_weights(self, verts: np.ndarray, bones: list[str], cand: list[str],
+                       near: np.ndarray | None = None) -> np.ndarray:
         """Each vertex follows its nearest bone of the layer; near a joint it blends with the bone on the other
         side (half and half at the joint, fading out over the bending zone). Columns follow ``cand``."""
-        dist = np.stack([_seg_dist(verts, *self.joints[b]) / self.widths[b] for b in bones], axis=1)
-        near = np.argmin(dist, axis=1)
+        if near is None:
+            dist = np.stack([_seg_dist(verts, *self.joints[b]) / self.widths[b] for b in bones], axis=1)
+            near = np.argmin(dist, axis=1)
         col = {b: k for k, b in enumerate(cand)}
         w = np.zeros((len(verts), len(cand)), np.float32)
         for k, b in enumerate(bones):
@@ -410,7 +522,7 @@ class SkinRig:
             save_parse(self.parse, out / "parse.png")
         data = {"format": "ggs.skin", "version": 1, "rig": self.rig.id, "image": "skin.png",
                 "height_px": self.height_px, "joints": self.joints, "widths": self.widths, "grid": self.grid,
-                "layout": self.layout, "confirmed": bool(getattr(self, "confirmed", False))}
+                "layout": self.layout, "confirmed": bool(getattr(self, "confirmed", False)), "mode": self.mode}
         (out / "skin.json").write_text(json.dumps(data, indent=1), encoding="utf-8")
         return out / "skin.json"
 
@@ -605,7 +717,7 @@ def v1_joints(joints: Joints) -> Joints:
 
 def build_skin(rig: RigSpec, image, joints: Joints, widths: dict[str, float], height_px: float,
                max_height: float | None = 640.0, grid: float = GRID, layout: dict | None = None,
-               parse: np.ndarray | None = None) -> SkinRig:
+               parse: np.ndarray | None = None, mode: str = MODE) -> SkinRig:
     """A SkinRig from a drawing (PIL RGBA). Large drawings are scaled to ``max_height`` px per standing height
     first (frames are made at game sizes; this keeps building and rendering quick)."""
     from PIL import Image
@@ -636,12 +748,12 @@ def build_skin(rig: RigSpec, image, joints: Joints, widths: dict[str, float], he
             lay = saved
         else:
             joints, widths = joints2, widths2
-        skin = SkinRig(rig, arr, joints, labels, widths, height_px, grid)
+        skin = SkinRig(rig, arr, joints, labels, widths, height_px, grid, mode)
         skin.layout = lay.model_dump()
         skin.parse = parse
         return skin
     labels = drawing_labels(arr, rig, joints, widths, height_px, parse)
-    skin = SkinRig(rig, arr, joints, labels, widths, height_px, grid)
+    skin = SkinRig(rig, arr, joints, labels, widths, height_px, grid, mode)
     skin.parse = parse
     return skin
 
@@ -662,6 +774,7 @@ def load_skin(path: str | Path, rig: RigSpec | None = None) -> SkinRig:
     from ggs.rig.parsing import load_parse
 
     skin = build_skin(rig, image, joints, data["widths"], data["height_px"], max_height=None,
-                      grid=data.get("grid", GRID), layout=data.get("layout"), parse=load_parse(path.parent / "parse.png"))
+                      grid=data.get("grid", GRID), layout=data.get("layout"), parse=load_parse(path.parent / "parse.png"),
+                      mode=data.get("mode", MODE))
     skin.confirmed = bool(data.get("confirmed", False))  # the user checked the joints in the editor
     return skin

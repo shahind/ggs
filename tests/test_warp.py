@@ -79,13 +79,16 @@ def test_labels_follow_the_skeleton(rig, guide):
     assert cloth_share(lab, rig, guide.spec.joints, widths) < 0.15  # trousers, no skirt
 
 
-def test_warp_rest_pose_reproduces_the_drawing_and_clips_play(rig, guide):
+@pytest.mark.parametrize("mode", ["connected", "layers"])
+def test_warp_rest_pose_reproduces_the_drawing_and_clips_play(rig, guide, mode):
     from ggs.rig.master import bone_angle, pose_clip
     from ggs.rig.skin import build_skin
 
     widths = bone_widths(guide.labels, rig, guide.spec.joints)
-    skin = build_skin(rig, guide.image, guide.spec.joints, widths, guide.spec.height_px)
-    assert not skin.skirt and {L.name for L in skin.layers} >= {"body", "upper_arm_near", "thigh_far"}
+    skin = build_skin(rig, guide.image, guide.spec.joints, widths, guide.spec.height_px, mode=mode)
+    names = {L.name for L in skin.layers}
+    assert not skin.skirt
+    assert names == {"body"} if mode == "connected" else names >= {"body", "upper_arm_near", "thigh_far"}
     angles = {b: bone_angle(*guide.spec.joints[b]) for b in guide.spec.joints}
     frames, _ = skin.render_clip(pose_clip(rig, angles, skin.lengths()), round(guide.spec.height_px))
     got = np.asarray(frames[0])[..., 3] >= 128
@@ -203,7 +206,7 @@ def test_limbs_bend_only_at_joints_and_stray_bits_join_their_surroundings(rig, g
     from ggs.rig.skin import build_skin, tidy_labels
 
     widths = bone_widths(guide.labels, rig, guide.spec.joints)
-    skin = build_skin(rig, guide.image, guide.spec.joints, widths, guide.spec.height_px)
+    skin = build_skin(rig, guide.image, guide.spec.joints, widths, guide.spec.height_px, mode="layers")
     names = [b.name for b in rig.bones]
     arm = next(L for L in skin.layers if L.name == "upper_arm_near")
     # a vertex in the middle of the forearm follows the forearm alone; at the elbow it is shared half and half
@@ -219,3 +222,29 @@ def test_limbs_bend_only_at_joints_and_stray_bits_join_their_surroundings(rig, g
     lab[int(hy) - 1:int(hy) + 2, int(hx) - 1:int(hx) + 2] = names.index("thigh_near")
     out = tidy_labels(lab, rig, guide.spec.joints, widths)
     assert out[int(hy), int(hx)] == names.index("head")
+
+
+def test_connected_warp_keeps_the_drawing_in_one_piece(rig, guide):
+    from ggs.rig.master import bone_angle, pose_clip
+    from ggs.rig.skin import build_skin
+
+    widths = bone_widths(guide.labels, rig, guide.spec.joints)
+    skin = build_skin(rig, guide.image, guide.spec.joints, widths, guide.spec.height_px)
+    assert skin.mode == "connected" and len(skin.layers) == 1
+    mesh = skin.layers[0]
+    names = [b.name for b in rig.bones]
+    # the forearm's middle follows the forearm alone (measured through the shape, not across the gap to the body)
+    (sx, sy), (ex, ey) = guide.spec.joints["forearm_near"]
+    mid = np.argmin(np.hypot(mesh.verts[:, 0] - (sx + ex) / 2, mesh.verts[:, 1] - (sy + ey) / 2))
+    assert mesh.weights[mid, names.index("forearm_near")] > 0.99
+    assert np.allclose(mesh.weights.sum(1), 1.0, atol=1e-4)
+    # bent hard, the posed drawing stays one connected piece
+    angles = {b: bone_angle(*guide.spec.joints[b]) for b in guide.spec.joints}
+    bent = {**angles, "upper_arm_near": angles["upper_arm_near"] + 80, "thigh_near": angles["thigh_near"] - 40}
+    frames, _ = skin.render_clip(pose_clip(rig, bent, skin.lengths()), 256)
+    from scipy import ndimage
+
+    solid = np.asarray(frames[0])[..., 3] >= 128
+    comp, n = ndimage.label(solid, structure=np.ones((3, 3), bool))
+    sizes = np.bincount(comp.ravel())[1:]
+    assert sizes.max() > 0.98 * solid.sum(), (n, sorted(sizes)[-3:])

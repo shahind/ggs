@@ -140,3 +140,15 @@ downloads are about 6–8 GB (SD 1.5, motion adapter, OpenPose ControlNet, IP-Ad
   - The accent is #FFEA00.
   - The Body & Pose preview shows a neutral grey mannequin. The pose guide the model sees is unchanged.
   - A hidden tab no longer widens the window: the pieces editor's toolbar forced 1872 px.
+
+### Connected warp (same evening)
+The owner saw the warp tear the picture apart in a run, which a warp should never do. The five separate layers
+were the cause. The warp is now one connected mesh, like Photoshop's Puppet Warp:
+- **Pins:** the confirmed joints, moved by the clip.
+- **Weights:** each vertex follows the bone nearest to it *through the shape* (geodesic distance on a 1/160-height
+  grid), so a hat brim never pulls the shoulders. It blends with the neighbouring bone only near their joint.
+- **Gaps:** the mesh is split only at vertices on empty space between unrelated parts (between the legs).
+  Everything that touches in the drawing stays joined and stretches.
+- **Overlaps:** triangles draw in the rig's order (far limbs behind, near limbs in front); no fills.
+- **Speed:** on the owner's Jones it builds in 0.8 s and draws a frame in about 23 ms.
+- The layered mode stays available (`mode="layers"` in skin.json) but is not used by default.

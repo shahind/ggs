@@ -162,7 +162,8 @@ def move_joints(skin_json: Path, moved: dict[str, Point]) -> SkinRig:
     from ggs.rig.layout import rig_for
 
     rebuilt = build_skin(rig_for(skin.rig.id, None) if skin.layout else skin.rig, _image(skin), new, skin.widths,
-                         skin.height_px, max_height=None, grid=skin.grid, layout=skin.layout, parse=skin.parse)
+                         skin.height_px, max_height=None, grid=skin.grid, layout=skin.layout, parse=skin.parse,
+                         mode=skin.mode)
     rebuilt.save(Path(skin_json).parent)
     return rebuilt
 
