@@ -57,3 +57,34 @@ Sources: github.com/shitagaki-lab/see-through, huggingface.co/layerdifforg, hugg
 github.com/facebookresearch/AnimatedDrawings, github.com/maruccimauro/rigby2d, huggingface.co/Wan-AI/Wan2.2-Animate-2-14B,
 huggingface.co/Wan-AI/Wan2.2-Animate-14B, github.com/ssj9596/One-to-All-Animation, huggingface.co/MochunniaN1,
 github.com/zai-org/SCAIL-2, github.com/Bingeljell/image-to-3dlab, github.com/VAST-AI-Research/UniRig, github.com/Seed3D/Puppeteer.
+
+## Follow-up (owner, same day): rigging models, hidden parts, MimicMotion first
+**2D rigging models / LoRAs:** none found in open source. What exists is prompt workflows ("parts sheet" prompts
+for any image model) and paid services (Layer.ai's Spine/Live2D parts-sheet tool). Character-sheet LoRAs
+(turnarounds) do not output separated limbs.
+
+**Image to layers / hidden parts:**
+- Qwen-Image-Layered (Apache-2.0, Dec 2025): splits a picture into a chosen number of RGBA layers; not by body
+  part, and 16 GB+ in practice.
+- Amodal completion (complete what is hidden): Open-World Amodal Appearance Completion (CVPR 2025,
+  saraao/amodal, Apache-2.0) inpaints the occluded part of an object with SD2 inpainting and returns RGBA.
+- GGS already has an editing model (FLUX.2 klein) that can inpaint a masked area from a text instruction.
+
+**Planned combination (owner's direction):**
+1. Body-part segmentation: See-through's body-part parser (SAM-HQ, Apache-2.0, 19 parts) or our SegFormer
+   parse, decides arm / torso / leg / head / hair / clothing and which side (near/far).
+2. The fitted joints (ViTPose) split a limb region along the bone: See-through merges thigh and shin, but the
+   knee joint says exactly where to cut.
+3. For each part, the pixels covered by parts in front (the chest under the arm) are masked and completed by an
+   inpainting model (klein edit, or the amodal-completion model), so every layer is whole.
+4. Whole layers -> rig (cut-out) or per-layer connected meshes (warp), drawn in depth order.
+
+**MimicMotion facts (for the spike):**
+- Code Apache-2.0; weights "other", fine-tuned from Stable Video Diffusion.
+- Needs `stabilityai/stable-video-diffusion-img2vid-xt-1-1`, which is **gated**: a Hugging Face login that has
+  accepted the Stability AI Community License (free under US$1M annual revenue, registration for commercial use,
+  "Powered by Stability AI" attribution, no use to train foundation models).
+- 16-frame U-Net: 8 GB minimum, VAE decoder on the CPU (16 GB on the GPU). 576 px short side; DWPose for poses.
+- Size versus One-to-All 1.3B: SVD-xt U-Net about 1.5B parameters, download about 8 GB in all. Wan2.1 1.3B is a
+  smaller network, but its umT5-xxl text encoder adds 6-11 GB of download; VRAM is similar if the text encoder
+  is streamed as GGS does for klein.
