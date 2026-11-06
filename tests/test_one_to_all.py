@@ -76,3 +76,17 @@ def test_frames_are_brought_back_to_the_designs_colours():
     before = np.abs(drift[on][:, :3].astype(int) - ref[on][:, :3]).mean()
     after = np.abs(out[on][:, :3].astype(int) - ref[on][:, :3]).mean()
     assert after < 0.2 * before and (out[..., 3] == drift[..., 3]).all()
+
+
+def test_cutout_cleanup_masks_gaps_and_joints_only():
+    from ggs.rig.cleanup import frame_masks
+
+    a = np.zeros((200, 120), np.uint8)
+    a[20:180, 30:90] = 255  # body piece
+    a[95:105, 55:65] = 0  # a hole between pieces
+    b = np.zeros_like(a)
+    b[60:120, 85:110] = 255  # arm piece beside it
+    on, solid, mask = frame_masks([a, b], 200.0, joints=[(88.0, 62.0)])
+    assert solid[100, 60] and not on[100, 60] and mask[100, 60]  # the hole is repainted
+    assert mask[62, 88]  # the joint disc
+    assert not mask[150, 40] and not mask[5, 5]  # plain art and background are left alone

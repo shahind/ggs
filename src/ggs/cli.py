@@ -1664,8 +1664,9 @@ def build_parser() -> argparse.ArgumentParser:
     cfr.add_argument("--no-vram-check", action="store_true")
     cfr.add_argument("--pose-style", default="skeleton", choices=["skeleton", "silhouette", "both"],
                      help=argparse.SUPPRESS)  # experiments: what One-to-All is shown for each pose
-    cfr.add_argument("--method", default="auto", choices=["auto", "one_to_all", "animatediff", "klein"],
-                     help="one_to_all / animatediff: pose-driven frame models (when downloaded); klein: one sheet "
+    cfr.add_argument("--method", default="auto", choices=["auto", "cutout", "one_to_all", "animatediff", "klein"],
+                     help="cutout: the sliced version plays the clip, a model repaints the joints (fast); "
+                          "one_to_all / animatediff: pose-driven frame models (when downloaded); klein: one sheet "
                           "of poses; auto: the best one downloaded")
     cfr.set_defaults(func=cmd_character_frames)
     cc = char.add_parser("cut", help="cut a master.json into a part sheet and validate it (exit 2 if rejected)")

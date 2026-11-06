@@ -605,6 +605,34 @@ def make_frames(project: Path, ref: str, clip_path: str | Path, *, frames: int =
         spec.body = (BodyShape(**cs.body) if cs.body else PRESETS[cs.body_preset]).model_dump()
     (work / "master.json").write_text(json.dumps(spec.model_dump(), indent=1), encoding="utf-8")
     method = frames_method() if method == "auto" else method
+    if method == "cutout":  # the sliced version plays the clip; SDXL repaints only gaps and joint seams
+        from ggs.pipeline.models import resolve_pipeline
+        from ggs.pipeline.vram import Stages
+        from ggs.rig.cleanup import clean_frames, cutout_frames
+        from ggs.rig.slices import sliced_character
+
+        ch = sliced_character(d)
+        if ch is None:
+            raise ItemError(f"{rec.name!r} has no sliced version yet: make it on the Sliced Version tab first")
+        progress.start("frames:cutout", ["encode", "denoise"])
+        seed = (seeds or [drawing["seed"]])[0]
+        cut, anchor = cutout_frames(ch, clip, frames)
+        who = "; ".join(info.get("text") or [rec.description])
+        fr = clean_frames(cut, f"{who}, 2d game character, clean cartoon drawing, flat colours, clean outlines, "
+                          "side view, white background", resolve_pipeline("sdxl", profile),
+                          Stages(profile=profile, enforce=enforce_vram), seed=seed)
+        fps = len(fr) / clip.duration
+        (out / "frames").mkdir()
+        for k, f in enumerate(fr):
+            f.save(out / "frames" / f"frame_{k:02d}.png")
+        save_apng(fr, out / f"{name}.png", fps, True)
+        save_webp(fr, out / f"{name}.webp", fps, True)
+        save_sprite_sheet(fr, anchor, out / f"{name}_sheet.png", name, fps, True)
+        (out / "report.json").write_text(json.dumps({
+            "format": "ggs.frames", "version": 1, "clip": str(clip_path), "frames": len(fr), "fps": round(fps, 3),
+            "seed": seed, "passed": True, "anchor": list(anchor), "method": "cutout", "checks": []},
+            indent=1), encoding="utf-8")
+        return out, []
     if method in ("animatediff", "one_to_all") and model != "stub":
         seed = (seeds or [drawing["seed"]])[0]
         if method == "one_to_all":

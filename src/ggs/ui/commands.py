@@ -211,8 +211,10 @@ def character_warp(project: Path, item: str, detail: str = "normal") -> list[str
     return [*GGS, "character", "warp", item, "--project", str(project), "--detail", detail]
 
 
-def character_frames(project: Path, item: str, clip: Path, frames: int, name: str | None = None) -> list[str]:
-    a = [*GGS, "character", "frames", item, "--project", str(project), "--clip", str(clip), "--frames", str(frames)]
+def character_frames(project: Path, item: str, clip: Path, frames: int, name: str | None = None,
+                     method: str = "auto") -> list[str]:
+    a = [*GGS, "character", "frames", item, "--project", str(project), "--clip", str(clip), "--frames", str(frames),
+         "--method", method]
     _opt(a, "--name", name)
     return a
 

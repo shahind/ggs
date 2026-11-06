@@ -149,3 +149,20 @@ front-facing).
 - **Jones:** passes, 0.904–0.910. The head piece is clean (hat, face, neck, no shirt) and the shirt is whole.
   Still rough: pointed overlap ends on the leg pieces, a notch at the back of the shoulder, a sliver above the
   upper arm.
+
+## Cut-Out Cleanup (built, 2026-11-06): the renderer does the motion, a model fills the gaps
+Owner's idea: give the cut-out animation to a model to fill the gaps of the cuts, instead of generating every
+frame from a skeleton.
+- **Rendering:** the sliced version renders each frame exactly (pose, shape and colours from the design).
+- **Mask:** `ggs.rig.cleanup.frame_masks` marks only:
+  - enclosed holes and narrow notches inside the outline (closed at 0.04 of the height; up to 0.12 near a
+    joint, for the back of a shoulder);
+  - small discs at the joints, except the wrists (a fist in front of the face would be repainted as face).
+  Drawn outlines and everything else are left alone.
+- **Fill:** gaps are pre-filled from the colours around them, then SDXL inpainting (Lightning, about 5 steps,
+  strength 0.6) repaints the mask at 768 px per height. The result is feathered back over the original frame.
+- **Jones:** walk 8 frames in 29 s; punch 12 frames in 44 s end to end, on the 8 GB laptop. The motion follows
+  the clip exactly and the design and colours stay. Joint seams and the shoulder notch are filled.
+  Remaining: some softness at knees and boots, a ragged back edge on the far side, small specks at a fist.
+- **UI:** Generated Frames > Method: Cut-Out Cleanup (default) or Generated (One-to-All). CLI:
+  `ggs character frames <item> --method cutout`.

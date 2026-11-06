@@ -902,6 +902,15 @@ class DrawnPanel(QWidget):
         self.frames.setToolTip("Frames per animation; the preview plays the skeleton at this count")
         self.frames.valueChanged.connect(lambda _v: self._later.start())
         top.addWidget(self.frames)
+        top.addSpacing(12)
+        top.addWidget(QLabel("Method"))
+        self.method = QComboBox()
+        self.method.addItem("Cut-Out Cleanup", "cutout")
+        self.method.addItem("Generated (One-to-All)", "auto")
+        self.method.setToolTip("Cut-Out Cleanup: the sliced version plays the animation exactly and a model "
+                               "repaints only the joints and gaps (seconds; needs the sliced version).\n"
+                               "Generated: a video model draws every frame from the design (minutes).")
+        top.addWidget(self.method)
         top.addStretch(1)
         right.addLayout(top)
         self.poses = FramePlayer("Select an animation")
@@ -993,7 +1002,8 @@ class DrawnPanel(QWidget):
                 return
             name = clips[0].stem
             job = Job(f"frames {self.ws.rec.name}", [C.character_frames(
-                self.project, f"character/{self.ws.rec.name}", clips[0], self.frames.value(), name)], exit_ok=(0, 2))
+                self.project, f"character/{self.ws.rec.name}", clips[0], self.frames.value(), name,
+                self.method.currentData() or "auto")], exit_ok=(0, 2))
             job.done = lambda ok: self._drawn(ok, job, name)
             run_on_stage(self.queue, job, self.stage)
 
