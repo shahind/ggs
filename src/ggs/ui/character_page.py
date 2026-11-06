@@ -605,6 +605,7 @@ class CutoutPanel(QWidget):
         self.tab, self.ws = tab, tab.ws
         self.queue, self.project = tab.queue, tab.project
         self._rig_key = None
+        self._rebuilding = False
         outer = QVBoxLayout(self)
         self.need = QFrame()
         self.need.setObjectName("panel")
@@ -628,6 +629,19 @@ class CutoutPanel(QWidget):
         self.need_stage.setVisible(False)
         nl.addWidget(self.need_stage, 1)
         outer.addWidget(self.need, 1)
+        # the sliced version was cut from an earlier design: say so, with the way to make it again
+        self.info = QFrame()
+        self.info.setObjectName("panel")
+        il = QHBoxLayout(self.info)
+        il.setContentsMargins(10, 6, 10, 6)
+        self.info_text = QLabel("This sliced version was made from an earlier design.")
+        il.addWidget(self.info_text, 1)
+        again = QPushButton("Generate Sliced Version")
+        set_icon(again, "layout")
+        again.clicked.connect(lambda: self.ws.show_tab(1))
+        il.addWidget(again)
+        self.info.setVisible(False)
+        outer.addWidget(self.info)
         self.body = QWidget()
         lay = QHBoxLayout(self.body)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -714,6 +728,16 @@ class CutoutPanel(QWidget):
         elif not side:
             self.need_text.setText("The sliced version is front view; animations need a side view.")
         else:
+            if self.warp and not self._rebuilding:
+                from ggs.rig.warp import warp_detail, warp_stale
+
+                if warp_stale(self.ws.dir):  # a new design or a new animation-ready drawing: bend that one
+                    self._make_warp(warp_detail(self.ws.dir))
+                    return
+            if not self.warp:
+                from ggs.rig.slices import sliced_stale
+
+                self.info.setVisible(sliced_stale(self.ws.dir))
             key = rig_key(ch)
             if key != self._rig_key:
                 from ggs.ui.anim_editor import PuppetRenderer, WarpRenderer
@@ -746,18 +770,25 @@ class CutoutPanel(QWidget):
             self._rig_key = None
             self.refresh()
 
-    def _make_warp(self) -> None:
+    def _make_warp(self, detail: str | None = None) -> None:
+        """Build the warp rig (``detail``: keep this mesh size; an automatic rebuild after a new picture)."""
+        if self._rebuilding:
+            return
         on_card = self.need.isVisible()
         stage = self.need_stage if on_card else self.stage
         combo = self.detail if on_card or not hasattr(self, "detail2") else self.detail2
+        detail = detail if isinstance(detail, str) else (combo.currentData() or "normal")
         job = Job(f"warp {self.ws.rec.name}", [C.character_warp(self.project, f"character/{self.ws.rec.name}",
-                                                                 combo.currentData() or "normal")])
+                                                                 detail)])
+        self._rebuilding = True
 
         def done(ok: bool) -> None:
+            self._rebuilding = False
             stage.setVisible(False)
             self.editor.setVisible(True)
             self._rig_key = None
-            self.refresh()
+            if ok:
+                self.refresh()
 
         job.done = done
         stage.setVisible(True)

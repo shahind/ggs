@@ -33,6 +33,50 @@ def warp_skin(item_dir: Path) -> Path | None:
     return p if p.exists() else None
 
 
+def warp_source(item_dir: Path) -> Path | None:
+    """The picture a warp is built from by default: the animation-ready drawing (made with the sliced version)
+    when there is one, else the accepted design."""
+    from ggs.items import design_dir
+    from ggs.rig.slices import rigdraw_dir
+
+    rd = rigdraw_dir(item_dir)
+    if (rd / "master.json").exists() and (rd / "master.png").exists():
+        return rd / "master.png"
+    p = design_dir(item_dir) / "design.png"
+    return p if p.exists() else None
+
+
+def picture_sig(p: Path) -> str:
+    import hashlib
+
+    return hashlib.sha1(Path(p).read_bytes()).hexdigest()
+
+
+def warp_stale(item_dir: Path) -> bool:
+    """True when the warp was built from another picture than the one it would be built from now (a new design
+    was accepted, or the sliced version drew a new animation-ready drawing)."""
+    if warp_skin(item_dir) is None:
+        return False
+    src = warp_source(item_dir)
+    if src is None:
+        return False
+    info_file = warp_dir(item_dir) / "warp.json"
+    info = json.loads(info_file.read_text(encoding="utf-8")) if info_file.exists() else {}
+    if "source_sig" in info:
+        return info["source_sig"] != picture_sig(src)
+    # warps made before the fingerprint: out of date when the picture is newer than the warp
+    return src.stat().st_mtime > (info_file if info_file.exists() else warp_skin(item_dir)).stat().st_mtime
+
+
+def warp_detail(item_dir: Path) -> str:
+    info_file = warp_dir(item_dir) / "warp.json"
+    if info_file.exists():
+        d = json.loads(info_file.read_text(encoding="utf-8")).get("detail")
+        if d in DETAIL:
+            return d
+    return "normal"
+
+
 def design_skeleton(item_dir: Path) -> tuple[dict, dict[str, tuple[Point, Point]], float]:
     """(skeleton.json data, joints in design pixels, pixels per standing height)."""
     from ggs.items import design_dir
@@ -111,8 +155,8 @@ def make_design_warp(project: Path, ref: str, detail: str = "normal", *, fit: bo
     skin = build_skin(rig, image, joints, widths, height_px, grid=DETAIL[detail], parse=parse if fit else None)
     out = skin.save(warp_dir(d))
     (warp_dir(d) / "warp.json").write_text(json.dumps({
-        "format": "ggs.warp", "version": 1, "design": rec.accepted, "detail": detail, "fitted": report},
-        indent=1), encoding="utf-8")
+        "format": "ggs.warp", "version": 1, "design": rec.accepted, "detail": detail, "fitted": report,
+        "source": "design", "source_sig": picture_sig(design_dir(d) / data["image"])}, indent=1), encoding="utf-8")
     return out
 
 
@@ -133,8 +177,8 @@ def _warp_from_drawing(d: Path, master_json: Path, detail: str) -> Path:
                       grid=DETAIL[detail], layout=layout, parse=load_parse(Path(master_json).parent / "parse.png"))
     out = skin.save(warp_dir(d))
     (warp_dir(d) / "warp.json").write_text(json.dumps({
-        "format": "ggs.warp", "version": 1, "source": "drawing", "detail": detail, "layout": layout}, indent=1),
-        encoding="utf-8")
+        "format": "ggs.warp", "version": 1, "source": "drawing", "detail": detail, "layout": layout,
+        "source_sig": picture_sig(Path(master_json).parent / "master.png")}, indent=1), encoding="utf-8")
     return out
 
 

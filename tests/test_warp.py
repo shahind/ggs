@@ -248,3 +248,32 @@ def test_connected_warp_keeps_the_drawing_in_one_piece(rig, guide):
     comp, n = ndimage.label(solid, structure=np.ones((3, 3), bool))
     sizes = np.bincount(comp.ravel())[1:]
     assert sizes.max() > 0.98 * solid.sum(), (n, sorted(sizes)[-3:])
+
+
+def test_warp_and_sliced_version_know_when_their_picture_changed(tmp_path):
+    from ggs.items import ItemRecord, design_dir
+    from ggs.rig.slices import rigdraw_dir, sliced_dir, sliced_stale
+    from ggs.rig.warp import picture_sig, warp_dir, warp_source, warp_stale
+
+    d = tmp_path / "items" / "character" / "hero"
+    design_dir(d).mkdir(parents=True)
+    (design_dir(d) / "design.png").write_bytes(b"first design")
+    warp_dir(d).mkdir()
+    (warp_dir(d) / "skin.json").write_text("{}", encoding="utf-8")
+    (warp_dir(d) / "warp.json").write_text(json.dumps({"source_sig": picture_sig(design_dir(d) / "design.png")}),
+                                           encoding="utf-8")
+    assert warp_source(d) == design_dir(d) / "design.png" and not warp_stale(d)
+    (design_dir(d) / "design.png").write_bytes(b"refined design")  # a new design was accepted
+    assert warp_stale(d)
+    rigdraw_dir(d).mkdir(parents=True)  # a new sliced version drew the animation-ready drawing: bend that
+    (rigdraw_dir(d) / "master.json").write_text("{}", encoding="utf-8")
+    (rigdraw_dir(d) / "master.png").write_bytes(b"drawing")
+    assert warp_source(d) == rigdraw_dir(d) / "master.png" and warp_stale(d)
+
+    rec = ItemRecord(name="hero", asset_class="character", accepted=2)
+    (d / "item.json").write_text(rec.model_dump_json(), encoding="utf-8")
+    sliced_dir(d).mkdir(parents=True, exist_ok=True)
+    (sliced_dir(d) / "slices.json").write_text(json.dumps({"design": 2}), encoding="utf-8")
+    assert not sliced_stale(d)
+    (d / "item.json").write_text(rec.model_copy(update={"accepted": 3}).model_dump_json(), encoding="utf-8")
+    assert sliced_stale(d)

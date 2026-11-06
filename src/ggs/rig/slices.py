@@ -152,6 +152,18 @@ def fit_masters(masters: list[Path], rig, model: str, stages) -> bool:
     return True
 
 
+def sliced_stale(item_dir: Path) -> bool:
+    """True when the sliced version was cut from an earlier design than the accepted one."""
+    from ggs.items import ItemRecord
+
+    p = sliced_dir(item_dir) / "slices.json"
+    if not p.exists() or not (Path(item_dir) / "item.json").exists():
+        return False
+    made_from = json.loads(p.read_text(encoding="utf-8")).get("design")
+    rec = ItemRecord.model_validate_json((Path(item_dir) / "item.json").read_text(encoding="utf-8"))
+    return made_from is not None and rec.accepted is not None and made_from != rec.accepted
+
+
 def rigdraw_dir(item_dir: Path) -> Path:
     """The animation-ready drawing: the design drawn by GGS in its layout's capture pose (``master.json`` +
     ``master.png`` + labels), shared by the sliced version and "Bend the drawing"."""
