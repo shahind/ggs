@@ -586,6 +586,13 @@ class AnimateTab(QWidget):
         self.stack.currentWidget().refresh()
 
 
+def rig_key(rig_file: Path) -> tuple:
+    """Changes whenever any file of a rig changes: the rig file itself, its pictures (edited pieces, an edited
+    warp picture) and its data, so the animation editor reloads after an edit."""
+    files = sorted(p for p in rig_file.parent.iterdir() if p.is_file() and p.suffix in (".png", ".json", ".yaml"))
+    return (str(rig_file), tuple((p.name, p.stat().st_mtime_ns, p.stat().st_size) for p in files))
+
+
 class CutoutPanel(QWidget):
     """Animations on the character, in a live editor: the drawing bent in one piece (``warp``) or the cut-out
     puppet (the sliced version). Frames are only rendered to files on export."""
@@ -707,7 +714,7 @@ class CutoutPanel(QWidget):
         elif not side:
             self.need_text.setText("The sliced version is front view; animations need a side view.")
         else:
-            key = (str(ch), ch.stat().st_mtime)
+            key = rig_key(ch)
             if key != self._rig_key:
                 from ggs.ui.anim_editor import PuppetRenderer, WarpRenderer
 

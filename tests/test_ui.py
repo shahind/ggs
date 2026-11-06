@@ -300,3 +300,17 @@ def test_every_icon_the_app_uses_exists(qapp):
     used |= {k.icon for k in KINDS} | {"app"}
     assert used <= have, used - have
     assert not icons.icon("delete").isNull() and not icons.icon("export", "dark").isNull()
+
+
+def test_rig_key_changes_when_pieces_are_edited(tmp_path, qapp):
+    import os
+
+    from ggs.ui.character_page import rig_key
+
+    (tmp_path / "character.yaml").write_text("rig: humanoid_side_v1\n", encoding="utf-8")
+    (tmp_path / "parts.png").write_bytes(b"one")
+    before = rig_key(tmp_path / "character.yaml")
+    (tmp_path / "parts.png").write_bytes(b"two!")
+    st = (tmp_path / "parts.png").stat()
+    os.utime(tmp_path / "parts.png", ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
+    assert rig_key(tmp_path / "character.yaml") != before
