@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ggs.rig.body import limits, saved_body
 from ggs.ui.icons import icon, set_icon
 from ggs.ui.theme import ACCENT, INK, NOTICE
 
@@ -45,10 +46,9 @@ def _rig(view: str):
 
 @lru_cache(maxsize=8)
 def _puppet(view: str, body_json: str):
-    from ggs.rig.body import BodyShape
     from ggs.rig.make import guide_puppet
 
-    return guide_puppet(_rig(view), BodyShape(**json.loads(body_json)), look="mannequin")
+    return guide_puppet(_rig(view), saved_body(json.loads(body_json)), look="mannequin")
 
 
 def _small_tile(text: str) -> QPushButton:
@@ -231,7 +231,8 @@ class BodyPoseEditor(QFrame):
             lab = QLabel(label)
             lab.setFixedWidth(70)
             sl = QSlider(Qt.Orientation.Horizontal)
-            sl.setRange(40, 220)
+            lo, hi = limits(key)
+            sl.setRange(max(40, math.ceil(lo * 100)), min(220, math.floor(hi * 100)))
             sl.valueChanged.connect(self._slid)
             sl.sliderReleased.connect(self._emit)
             r.addWidget(lab)
@@ -251,9 +252,8 @@ class BodyPoseEditor(QFrame):
     # ------------------------------------------------------------------ state
 
     def body_shape(self):
-        from ggs.rig.body import BodyShape
 
-        return BodyShape(**self.cs.body) if self.cs.body else self.presets.get(self.cs.body_preset,
+        return saved_body(self.cs.body) if self.cs.body else self.presets.get(self.cs.body_preset,
                                                                              self.presets["standard"])
 
     def _set_sliders(self) -> None:

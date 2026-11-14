@@ -91,12 +91,12 @@ def design_skeleton(item_dir: Path) -> tuple[dict, dict[str, tuple[Point, Point]
 
 def body_widths(rig, cs, joints: dict, height_px: float) -> dict[str, float]:
     """Part half-widths for the design's body shape, in design pixels (from the programmer-art puppet)."""
-    from ggs.rig.body import PRESETS, BodyShape
+    from ggs.rig.body import PRESETS, saved_body
     from ggs.rig.joints import bone_widths
     from ggs.rig.make import guide_puppet
     from ggs.rig.master import render_guide
 
-    body = BodyShape(**cs.body) if cs.body else PRESETS.get(cs.body_preset, PRESETS["standard"])
+    body = saved_body(cs.body) if cs.body else PRESETS.get(cs.body_preset, PRESETS["standard"])
     puppet, lengths = guide_puppet(rig, body)
     guide = render_guide(rig, puppet, lengths, size=1024)
     k = height_px / guide.spec.height_px

@@ -246,7 +246,7 @@ def make_slices(project: Path, ref: str, template: str = "side_simple", *, layou
     from ggs.pipeline import progress
     from ggs.pipeline.vram import Stages
     from ggs.recipes import load_recipe
-    from ggs.rig.body import PRESETS, BodyShape
+    from ggs.rig.body import PRESETS, saved_body
     from ggs.rig.layout import capture_pose
     from ggs.rig.make import CHARACTER_TEXT, guide_puppet, on_white, pose_reference
     from ggs.rig.master import render_guide, save_master
@@ -261,7 +261,7 @@ def make_slices(project: Path, ref: str, template: str = "side_simple", *, layou
     info = json.loads(info_file.read_text(encoding="utf-8"))
     drawing = info["drawing"]
     cs = CharacterSettings(**(drawing.get("character") or {}))
-    body = BodyShape(**cs.body) if cs.body else PRESETS.get(cs.body_preset, PRESETS["standard"])
+    body = saved_body(cs.body) if cs.body else PRESETS.get(cs.body_preset, PRESETS["standard"])
     model = drawing.get("model") or "flux2-klein-4b"
     view = template_view(t)
     rig = rig_for(view)

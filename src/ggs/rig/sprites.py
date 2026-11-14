@@ -204,7 +204,7 @@ def make_sprites(master_json: str | Path, clip_path: str | Path, rig: RigSpec, o
     from ggs.generate import build_backends, real_rgba
     from ggs.pipeline.vram import Stages
     from ggs.recipes import load_recipe
-    from ggs.rig.body import BodyShape
+    from ggs.rig.body import saved_body
     from ggs.rig.clip import load_clip
     from ggs.rig.make import guide_puppet, on_white
     from ggs.rig.master import MasterSpec
@@ -216,7 +216,7 @@ def make_sprites(master_json: str | Path, clip_path: str | Path, rig: RigSpec, o
     clip = load_clip(clip_path)
     if clip.rig != rig.id:
         raise ValueError(f"clip is for rig {clip.rig!r}, not {rig.id!r}")
-    puppet, lengths = guide_puppet(rig, BodyShape(**spec.body) if spec.body else None)
+    puppet, lengths = guide_puppet(rig, saved_body(spec.body) if spec.body else None)
     sheet, masks, idx, cell_anchor = pose_sheet(rig, puppet, clip, s, lengths)
     style, lora = "", None
     if style_ref:
@@ -600,9 +600,9 @@ def make_frames(project: Path, ref: str, clip_path: str | Path, *, frames: int =
     spec = guide.spec.model_copy(update={"image": "design.png", "prompt": prompt, "seed": drawing["seed"],
                                          "model": model, "body": guide.spec.body or (cs.body or {})})
     if cs.body or cs.body_preset != "standard":
-        from ggs.rig.body import PRESETS, BodyShape
+        from ggs.rig.body import PRESETS, saved_body
 
-        spec.body = (BodyShape(**cs.body) if cs.body else PRESETS[cs.body_preset]).model_dump()
+        spec.body = (saved_body(cs.body) if cs.body else PRESETS[cs.body_preset]).model_dump()
     (work / "master.json").write_text(json.dumps(spec.model_dump(), indent=1), encoding="utf-8")
     method = frames_method() if method == "auto" else method
     if method == "cutout":  # the sliced version plays the clip; SDXL repaints only gaps and joint seams
@@ -681,13 +681,13 @@ def make_frames(project: Path, ref: str, clip_path: str | Path, *, frames: int =
 
 def pose_preview(clip_path: str | Path, frames: int, body: dict | None = None, body_preset: str = "standard"):
     """The stick-figure sheet the model is given for a clip (RGB), for showing before drawing."""
-    from ggs.rig.body import PRESETS, BodyShape
+    from ggs.rig.body import PRESETS, saved_body
     from ggs.rig.clip import load_clip
     from ggs.rig.make import guide_puppet
     from ggs.rig.poses import rig_for
 
     rig = rig_for("side")
-    shape = BodyShape(**body) if body else PRESETS.get(body_preset, PRESETS["standard"])
+    shape = saved_body(body) if body else PRESETS.get(body_preset, PRESETS["standard"])
     puppet, lengths = guide_puppet(rig, shape)
     sheet, _, _, _ = pose_sheet(rig, puppet, load_clip(clip_path), settings_for(frames), lengths)
     return sheet

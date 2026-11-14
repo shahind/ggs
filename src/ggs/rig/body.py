@@ -80,6 +80,33 @@ _SEGMENTS = ("head", "torso", "upper_arm", "forearm", "hand", "thigh", "shin")
 RATIOS = ("head", "torso", "arms", "legs", "width", "upper_arm", "forearm", "thigh", "shin")
 
 
+def limits(field: str) -> tuple[float, float]:
+    """(lowest, highest) value a body ratio accepts: what a slider or a saved body may hold."""
+    lo, hi = 0.0, float("inf")
+    for m in BodyShape.model_fields[field].metadata:
+        if getattr(m, "gt", None) is not None:
+            lo = float(m.gt) + 0.01
+        if getattr(m, "ge", None) is not None:
+            lo = float(m.ge)
+        if getattr(m, "le", None) is not None:
+            hi = float(m.le)
+        if getattr(m, "lt", None) is not None:
+            hi = float(m.lt) - 0.01
+    return lo, hi
+
+
+def saved_body(data: dict) -> BodyShape:
+    """A body stored in a project (character settings, saved shapes): ratios outside the allowed range are pulled
+    back to the nearest limit instead of failing, so a body saved by an older version still opens."""
+    fixed = dict(data)
+    for k in RATIOS:
+        v = fixed.get(k)
+        if isinstance(v, (int, float)):
+            lo, hi = limits(k)
+            fixed[k] = min(max(float(v), lo), hi)
+    return BodyShape(**fixed)
+
+
 def parse_body(text: str | None) -> BodyShape:
     """A preset name, or comma-separated ratios like 'head=1.6,legs=0.7,width=1.2' (others stay 1)."""
     if not text:

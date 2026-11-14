@@ -146,3 +146,30 @@ def test_editor_saves_and_offers_presets(qapp, tmp_path, library_home):
     assert len(ed.bodies.buttons()) == n_bodies + 1 and ed.cs.body["name"] == "Long legs"
     other = BodyPoseEditor(I.CharacterSettings(view="front"), tmp_path / "g")  # a second character sees them
     assert "Salute" in [b.property("saved").name for b in other.poses.buttons()]
+
+
+def test_body_sliders_at_their_ends_stay_valid(qapp):
+    """Every slider pushed to its far end gives a body the model accepts (the 2.2 vs <=2.0 crash)."""
+    from ggs.rig.body import BodyShape, limits
+    from ggs.ui.character_editor import BodyPoseEditor
+
+    ed = BodyPoseEditor(I.CharacterSettings(view="side", pose="idle"))
+    for key, sl in ed.sliders.items():
+        lo, hi = limits(key)
+        assert lo <= sl.minimum() / 100 and sl.maximum() / 100 <= hi, key
+    for end in ("maximum", "minimum"):
+        for sl in ed.sliders.values():
+            sl.setValue(getattr(sl, end)())
+        BodyShape(**ed.cs.body)  # strict: no clamping needed
+    ed._emit()
+
+
+def test_a_body_saved_out_of_range_still_opens(qapp):
+    from ggs.rig.body import saved_body
+    from ggs.ui.character_editor import BodyPoseEditor
+
+    bad = {"name": "custom", "head": 1.0, "torso": 2.2, "thigh": 2.13, "shin": 0.1, "width": 9.0}
+    b = saved_body(bad)
+    assert b.thigh == 2.0 and b.torso == 2.0 and b.width == 2.5 and 0.3 < b.shin < 0.32
+    ed = BodyPoseEditor(I.CharacterSettings(view="side", pose="idle", body=bad))
+    assert ed.sliders["thigh"].value() == 200

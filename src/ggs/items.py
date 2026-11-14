@@ -408,13 +408,13 @@ def _draw_asset(project: Path, rec: ItemRecord, d: Path, vs: list[Version], edit
 
 def character_guide(cs: CharacterSettings, size: int = 1024):
     """The pose guide for a character's settings: (rig, guide, body)."""
-    from ggs.rig.body import PRESETS, BodyShape
+    from ggs.rig.body import PRESETS, saved_body
     from ggs.rig.make import guide_puppet
     from ggs.rig.master import render_guide
     from ggs.rig.poses import pose_angles, rig_for
 
     rig = rig_for(cs.view)
-    body = BodyShape(**cs.body) if cs.body else PRESETS.get(cs.body_preset, PRESETS["standard"])
+    body = saved_body(cs.body) if cs.body else PRESETS.get(cs.body_preset, PRESETS["standard"])
     puppet, lengths = guide_puppet(rig, body)
     guide = render_guide(rig, puppet, lengths, size=size, angles=pose_angles(cs.view, cs.pose))
     return rig, guide, body
