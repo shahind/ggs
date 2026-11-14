@@ -10,7 +10,8 @@ from pydantic import BaseModel
 
 from ggs.paths import registry_path
 
-Kind = Literal["base", "component", "lora", "motion", "segmentation", "matting", "captioning", "dataset"]
+Kind = Literal["base", "cloud", "component", "lora", "motion", "segmentation", "matting", "captioning",
+               "dataset"]  # cloud: a provider-hosted model, used with the user's own API key
 
 
 class ModelEntry(BaseModel):

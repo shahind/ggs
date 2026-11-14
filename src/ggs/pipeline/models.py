@@ -110,8 +110,34 @@ class FramesSpec(BaseModel):
     text_encoder: list[str] = Field(default_factory=list)
 
 
+class CloudSpec(BaseModel):
+    """An image model that runs on a provider's servers (no download, no VRAM): Google's Nano Banana family
+    through the Gemini API. Used like a local base model; the user's own API key pays for it."""
+
+    registry: str
+    provider: str = "google"
+    api_model: str  # the provider's model id, e.g. gemini-3-pro-image
+    label: str  # shown in the app
+    note: str = ""  # one line for the app: speed / quality / price
+    sizes: list[str] = Field(default_factory=list)  # accepted image_size values ("512", "1K"...); [] = never sent
+    aspects: list[str] = Field(default_factory=lambda: list(STANDARD_ASPECTS))
+    max_refs: int = Field(3, ge=1)  # reference images per request
+    price: dict[str, float] = Field(default_factory=dict)  # USD per output image by size (list price, for the UI)
+
+    @field_validator("provider")
+    @classmethod
+    def _known_provider(cls, v: str) -> str:
+        if v != "google":
+            raise ValueError(f"unknown cloud provider {v!r}; known: ['google']")
+        return v
+
+
+STANDARD_ASPECTS = ("1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9")
+
+
 class PipelinesFile(BaseModel):
     pipelines: dict[str, PipelineSpec]
+    cloud: dict[str, CloudSpec] = Field(default_factory=dict)  # provider-hosted base models (ggs.pipeline.cloud)
     matting: dict[str, MattingSpec] = Field(default_factory=dict)
     captioning: dict[str, MattingSpec] = Field(default_factory=dict)  # same shape: registry id + paths
     pose: dict[str, MattingSpec] = Field(default_factory=dict)  # joint detectors (same shape)

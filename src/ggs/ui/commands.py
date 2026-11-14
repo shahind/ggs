@@ -243,6 +243,10 @@ def models_check() -> list[str]:
     return [*GGS, "models", "check"]
 
 
+def cloud_key_check(model: str) -> list[str]:
+    return [*GGS, "cloud", "key", "check", "--model", model]
+
+
 def models_add_dir(path: Path) -> list[str]:
     return [*GGS, "models", "add-dir", str(path)]
 

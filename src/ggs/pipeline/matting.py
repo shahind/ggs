@@ -26,7 +26,9 @@ class BiRefNetMatter:
         out = []
         with stages.stage("matte"):
             net = AutoModelForImageSegmentation.from_pretrained(str(self.path), trust_remote_code=True)
-            net.to("cuda").eval().half()
+            # no NVIDIA GPU (a cloud base model on a laptop): the CPU in fp32, slower but the same cut-out
+            dev, dtype = ("cuda", torch.float16) if torch.cuda.is_available() else ("cpu", torch.float32)
+            net.to(dev, dtype).eval()
             mean = torch.tensor(MEAN).view(1, 3, 1, 1)
             std = torch.tensor(STD).view(1, 3, 1, 1)
             with torch.no_grad():
@@ -34,7 +36,7 @@ class BiRefNetMatter:
                     x = np.asarray(img.convert("RGB").resize((self.size, self.size), Image.BICUBIC),
                                    dtype=np.float32) / 255.0
                     t = (torch.from_numpy(x).permute(2, 0, 1).unsqueeze(0) - mean) / std
-                    pred = net(t.to("cuda").half())[-1].sigmoid()[0, 0].float().cpu().numpy()
+                    pred = net(t.to(dev, dtype))[-1].sigmoid()[0, 0].float().cpu().numpy()
                     mask = Image.fromarray((pred * 255).round().astype("uint8"), "L")
                     out.append(mask.resize(img.size, Image.BICUBIC))
             del net

@@ -27,17 +27,24 @@ class AssetResult:
 
 
 def build_backends(recipe: Recipe, model: str, profile: str):
-    """(generator, matter) for ``model``: a pipeline from models/pipelines.yaml, or 'stub' (CPU, tests)."""
+    """(generator, matter) for ``model``: a pipeline from models/pipelines.yaml, a cloud model (Nano Banana,
+    ``cloud:`` in the same file), or 'stub' (CPU, tests)."""
     if model == "stub":
         from ggs.pipeline.stub import StubGenerator, StubMatter
 
         return StubGenerator(recipe.background_rgb), StubMatter(recipe.background_rgb)
+    from ggs.pipeline.matting import BiRefNetMatter
     from ggs.pipeline.models import load_pipelines, resolve_matting, resolve_pipeline
 
     spec_file = load_pipelines()
+    if model in spec_file.cloud:  # drawn on Google's servers; matting still runs here (real alpha)
+        from ggs.pipeline.cloud import api_key, make_cloud_generator
+
+        api_key()  # fail before anything loads when there is no key
+        return make_cloud_generator(spec_file.cloud[model]), BiRefNetMatter(
+            resolve_matting(recipe.matting, spec_file=spec_file))
     files = resolve_pipeline(model, profile, spec_file=spec_file)
     from ggs.pipeline.backends import make_generator
-    from ggs.pipeline.matting import BiRefNetMatter
 
     gen = make_generator(spec_file.pipelines[model], files)
     return gen, BiRefNetMatter(resolve_matting(recipe.matting, spec_file=spec_file))
@@ -136,6 +143,7 @@ def run_recipe(recipe: Recipe, description: str, out: Path, *, model: str | None
     images = gen.generate(prompt, seeds, width, height, stages, lora=lora,
                           lora_scale=1.0 if style_weight is None else style_weight, **extra)
     alphas = matter.alphas(images, stages)
+    from ggs.pipeline.cloud import cost as cloud_cost
 
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -166,6 +174,7 @@ def run_recipe(recipe: Recipe, description: str, out: Path, *, model: str | None
         "size": [width, height],
         "seconds": round(time.perf_counter() - t0, 2),
         "stages": stages.summary(),
+        "cloud": cloud_cost(gen, width, height),
         "assets": [{"seed": r.seed, "file": r.path.name if r.path else None, "passed": r.passed,
                     "size": r.size, "failures": r.failures, "qa": r.qa} for r in results],
     }

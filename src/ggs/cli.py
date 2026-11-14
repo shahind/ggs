@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -132,10 +133,13 @@ def cmd_generate(args: argparse.Namespace) -> int:
     except ValueError as exc:  # StyleError: not a project / bad project.yaml
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
-    if model != "stub" and profile not in ("standard", "lite"):
+    from ggs.pipeline.cloud import is_cloud
+
+    local = model != "stub" and not is_cloud(model)  # cloud models draw on Google's servers: any profile
+    if local and profile not in ("standard", "lite"):
         print(f"ERROR: profile {profile!r}: {PROFILE_HELP.get(profile, '')}", file=sys.stderr)
         return 1
-    if model != "stub" and recipe.min_profile == "standard" and profile != "standard":
+    if local and recipe.min_profile == "standard" and profile != "standard":
         print(f"ERROR: class {recipe.id!r} needs the standard profile", file=sys.stderr)
         return 1
     size = None
@@ -170,6 +174,10 @@ def cmd_generate(args: argparse.Namespace) -> int:
         else:
             where = f" (kept as {r.path})" if r.path else ""
             print(f"seed {r.seed}: QA FAILED{where}: " + "; ".join(r.failures))
+    c = meta.get("cloud")
+    if c:
+        usd = "" if c["usd_estimate"] is None else f", about ${c['usd_estimate']:.3f} at list price"
+        print(f"cloud: {c['images']} image(s) from {c['model']} at {c['size']}{usd}")
     print(f"{ok}/{len(results)} passed QA; details in {Path(args.out).with_suffix('.json')}")
     return 0 if ok == len(results) else 2
 
@@ -178,13 +186,71 @@ def cmd_project_init(args: argparse.Namespace) -> int:
     from ggs.pipeline.models import load_pipelines
     from ggs.style.package import StyleError, init_project
 
-    known = sorted(load_pipelines().pipelines)
+    spec_file = load_pipelines()
+    known = sorted([*spec_file.pipelines, *spec_file.cloud])
     if args.model and args.model not in known:
         print(f"ERROR: unknown base model {args.model!r}; known: {known}", file=sys.stderr)
         return 1
     try:
         print(f"created {init_project(args.path, args.name, args.model)}")
     except StyleError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_cloud_models(_: argparse.Namespace) -> int:
+    from ggs.pipeline.cloud import CloudError, key_source
+    from ggs.pipeline.models import load_pipelines
+
+    for name, s in load_pipelines().cloud.items():
+        price = ", ".join(f"{k} ${v:g}" for k, v in s.price.items())
+        print(f"{name:20} {s.api_model:30} {s.label:24} {price}")
+    try:
+        src = key_source()
+    except CloudError as exc:
+        src = f"unreadable ({exc})"
+    print(f"API key: {'none (ggs cloud key set)' if src is None else src}")
+    return 0
+
+
+def cmd_cloud_key_set(args: argparse.Namespace) -> int:
+    from ggs.pipeline.cloud import CloudError, save_key
+
+    if args.from_env:
+        key = os.environ.get(args.from_env, "")
+    elif sys.stdin is not None and sys.stdin.isatty():
+        import getpass
+
+        key = getpass.getpass("Google AI Studio API key (not shown): ")
+    else:  # piped in: the key never appears on a command line
+        key = sys.stdin.readline() if sys.stdin is not None else ""
+    try:
+        print(f"saved the API key in {save_key(key)}")
+    except CloudError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_cloud_key_clear(_: argparse.Namespace) -> int:
+    from ggs.pipeline.cloud import clear_key
+
+    print("removed the saved API key" if clear_key() else "no saved API key")
+    return 0
+
+
+def cmd_cloud_key_check(args: argparse.Namespace) -> int:
+    from ggs.pipeline.cloud import CloudError, api_key, check_key, cloud_spec, mask
+
+    spec = cloud_spec(args.model)
+    if spec is None:
+        print(f"ERROR: {args.model!r} is not a cloud model (ggs cloud models)", file=sys.stderr)
+        return 1
+    try:
+        key = api_key()
+        print(f"OK key {mask(key)} can use {check_key(spec, key)} ({spec.api_model})")
+    except CloudError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     return 0
@@ -1367,6 +1433,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     from ggs.recipes import available_recipes
 
+    cl = sub.add_parser("cloud", help="cloud base models (Google Nano Banana) and the API key").add_subparsers(
+        dest="cloud_cmd", required=True)
+    cl.add_parser("models", help="list the cloud models, their prices and the key status").set_defaults(
+        func=cmd_cloud_models)
+    ck2 = cl.add_parser("key", help="the Google AI Studio API key").add_subparsers(dest="key_cmd", required=True)
+    ks = ck2.add_parser("set", help="save the key (typed hidden, or piped on stdin); encrypted for this user")
+    ks.add_argument("--from-env", default=None, metavar="VAR", help="copy it from this environment variable")
+    ks.set_defaults(func=cmd_cloud_key_set)
+    ck2.add_parser("clear", help="delete the saved key").set_defaults(func=cmd_cloud_key_clear)
+    kc = ck2.add_parser("check", help="check the key against Google (draws nothing, costs nothing)")
+    kc.add_argument("--model", default="nano-banana-2.1")
+    kc.set_defaults(func=cmd_cloud_key_check)
+
     gen = sub.add_parser("generate", help="generate an asset of an explicit class (recipe)")
     gen.add_argument("--class", dest="asset_class", required=True, choices=available_recipes(),
                      help="asset class (recipe); never inferred from the prompt")
@@ -1378,7 +1457,8 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument("--project", default=None, help="project folder whose installed styles to use")
     gen.add_argument("--seed", type=int, default=0)
     gen.add_argument("--count", type=int, default=1, help="number of variants (seeds seed..seed+count-1)")
-    gen.add_argument("--model", default=None, help="pipeline id from models/pipelines.yaml, or 'stub' (CPU test)")
+    gen.add_argument("--model", default=None, help="pipeline id from models/pipelines.yaml (a local model, or a "
+                                                    "cloud one such as nano-banana-pro), or 'stub' (CPU test)")
     gen.add_argument("--size", default=None, help="override generation size, e.g. 768x768")
     gen.add_argument("--profile", choices=["standard", "lite"], default=None, help="default: from ggs doctor")
     gen.add_argument("--keep-failed", action="store_true", help="also write assets that fail QA (*_QA_FAILED)")

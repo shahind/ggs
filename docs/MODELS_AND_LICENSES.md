@@ -21,6 +21,9 @@ Machine-readable version: `models/registry.yaml`. This file records the reasonin
 - CMU mocap: reported as free for all uses; confirm on CMU's site; do not resell raw data.
 - Community LoRAs (sprite-sheet, 4-walk): check each repo's license; a LoRA inherits constraints from its base model.
 - Mixamo: free, but Adobe terms need reading; do not use it as ML training data.
+- Google Nano Banana (Gemini API, cloud; added 2026-11-13): a hosted service used with the user's own API key,
+  opt-in, never default, nothing bundled. Read the Gemini API Additional Terms on output ownership and commercial
+  use before release. Outputs carry Google's SynthID watermark. See `docs/CLOUD_MODELS.md`.
 
 ## Process
 Every new model/LoRA/dataset gets a registry entry and a license-auditor review. Record the source URL and date.

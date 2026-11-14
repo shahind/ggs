@@ -94,6 +94,13 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def create_project(self, folder: Path, name: str, model: str) -> None:
+        from ggs.pipeline.cloud import is_cloud
+
+        if is_cloud(model):  # ask for the key now; without one the project starts on the local model
+            from ggs.ui.cloud_key import ensure_key
+
+            if not ensure_key(self.queue, self, model):
+                model = "flux2-klein-4b"
         job = Job("new project", [C.project_init(folder, name, model)])
 
         def done(ok: bool) -> None:

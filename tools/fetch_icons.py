@@ -66,6 +66,8 @@ ICONS = {
     "front": "person-standing",
     "side": "footprints",
     "diagnostics": "activity",
+    "cloud": "cloud",
+    "key": "key-round",
 }
 
 

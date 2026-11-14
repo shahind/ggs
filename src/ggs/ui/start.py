@@ -135,14 +135,20 @@ class NewProjectDialog(QDialog):
         row = QHBoxLayout()
         self.models = QButtonGroup(self)
         for mid, title, sub in (("flux2-klein-4b", "FLUX.2 klein", "best quality"),
-                                ("sdxl", "SDXL", "faster style training")):
-            b = tile(title, sub, 200, 64)
+                                ("sdxl", "SDXL", "faster style training"),
+                                ("nano-banana-2.1", "Nano Banana", "Google cloud, API key")):
+            b = tile(title, sub, 160, 64)
             b.setProperty("model", mid)
             self.models.addButton(b)
             row.addWidget(b)
         row.addStretch(1)
         self.models.buttons()[0].setChecked(True)
         lay.addLayout(row)
+        more = QLabel("Nano Banana runs on Google's servers (no GPU needed, billed per image by Google). "
+                      "Pick Flash, Lite or Pro later in the project's Base model list.")
+        more.setWordWrap(True)
+        more.setObjectName("muted")
+        lay.addWidget(more)
         btns = QHBoxLayout()
         btns.addStretch(1)
         cancel = QPushButton("Cancel")

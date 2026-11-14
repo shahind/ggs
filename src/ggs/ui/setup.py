@@ -32,26 +32,43 @@ def pack_status() -> list[tuple[str, object, bool]]:
     return [(n, p, pack_ready(p)) for n, p in load_packs().items()]
 
 
+CLOUD_REPLACES = ("drawing",)  # packs a Google API key stands in for (Nano Banana draws instead)
+
+
+def needed(name: str, pack, cloud: bool | None = None) -> bool:
+    """A required pack, unless a Google key is set and the pack is the local drawing model."""
+    if not pack.required:
+        return False
+    if name in CLOUD_REPLACES:
+        if cloud is None:
+            from ggs.ui.cloud_key import has_key
+
+            cloud = has_key()
+        return not cloud
+    return True
+
+
 def missing_required() -> bool:
     try:
-        return any(p.required and not ok for _, p, ok in pack_status())
+        return any(needed(n, p) and not ok for n, p, ok in pack_status())
     except Exception:  # noqa: BLE001 - a broken manifest must not stop the app from opening
         return False
 
 
 class PackRow(QFrame):
-    def __init__(self, name: str, pack, ready: bool):
+    def __init__(self, name: str, pack, ready: bool, cloud: bool = False):
         super().__init__()
         self.name, self.pack = name, pack
+        self.required = needed(name, pack, cloud)
         self.setObjectName("card")
         lay = QHBoxLayout(self)
         self.pick = QCheckBox()
-        self.pick.setChecked(not ready and pack.required)
+        self.pick.setChecked(not ready and self.required)
         self.pick.setEnabled(not ready)
         lay.addWidget(self.pick)
         text = QVBoxLayout()
         t = QLabel(f"<b>{pack.label}</b>")
-        why = QLabel(f"{pack.why}  ({pack.size_gb:.1f} GB{'' if pack.required else ', optional'})")
+        why = QLabel(f"{pack.why}  ({pack.size_gb:.1f} GB{'' if self.required else ', optional'})")
         why.setObjectName("muted")
         why.setWordWrap(True)
         text.addWidget(t)
@@ -93,8 +110,11 @@ class ModelSetupDialog(QDialog):
         hint.setObjectName("muted")
         lay.addWidget(hint)
         self.rows: list[PackRow] = []
+        from ggs.ui.cloud_key import has_key
+
+        cloud = has_key()
         for name, pack, ready in pack_status():
-            row = PackRow(name, pack, ready)
+            row = PackRow(name, pack, ready, cloud)
             row.pick.toggled.connect(self._update)
             self.rows.append(row)
             lay.addWidget(row)
@@ -107,6 +127,11 @@ class ModelSetupDialog(QDialog):
         have.setToolTip("Choose a folder with the model files, for example ComfyUI's 'models' folder")
         have.clicked.connect(self._add_folder)
         btns.addWidget(have)
+        google = QPushButton("Use Google AI...")
+        google.setToolTip("No big drawing model: draw with Google's Nano Banana using your own API key "
+                          "(the small cut-out models are still needed)")
+        google.clicked.connect(self._google)
+        btns.addWidget(google)
         btns.addStretch(1)
         self.later = QPushButton("Later")
         self.later.clicked.connect(self.reject)
@@ -123,7 +148,7 @@ class ModelSetupDialog(QDialog):
         gb = sum(r.pack.size_gb for r in picked)
         self.go.setEnabled(bool(picked) and not self.queue.busy)
         self.go.setText(f"Download {gb:.1f} GB" if picked else "Download")
-        if all(r.ready for r in self.rows if r.pack.required):
+        if all(r.ready for r in self.rows if r.required):
             self.note.setText("Everything needed to draw is ready.")
             self.later.setText("Close")
 
@@ -131,6 +156,17 @@ class ModelSetupDialog(QDialog):
         ready = {n: ok for n, _, ok in pack_status()}
         for r in self.rows:
             r.set_ready(ready.get(r.name, False))
+        self._update()
+
+    def _google(self) -> None:
+        from ggs.ui.cloud_key import GoogleKeyDialog, has_key
+
+        GoogleKeyDialog(self.queue, self).exec()
+        cloud = has_key()
+        for r in self.rows:
+            r.required = needed(r.name, r.pack, cloud)
+            if r.name in CLOUD_REPLACES and cloud and not r.ready:
+                r.pick.setChecked(False)
         self._update()
 
     def _add_folder(self) -> None:

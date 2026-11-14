@@ -40,6 +40,53 @@ pipelines:
                negative: "blurry, lowres, jpeg artifacts, watermark, text, signature, cropped, frame"}
     training: {resolution: 1024, max_resolution: {lite: 1024, standard: 1024}, steps: 1500, lr: 1.0e-4, rank: 16}
 
+# Cloud base models: Google's Nano Banana family through the Gemini API (a Google AI Studio API key, stored with
+# `ggs cloud key set`). Nothing is downloaded and no VRAM is used for drawing; matting (BiRefNet) still runs here.
+# Prices: Google's list price per output image (USD, 2026-11), shown in the app; check Google's pricing page.
+cloud:
+  nano-banana-2.1:
+    registry: google-nano-banana-2.1
+    api_model: gemini-nano-banana-2.1
+    label: Nano Banana 2.1
+    note: newest; good and cheap
+    sizes: ["1K", "2K", "4K"]
+    aspects: ["1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"]
+    max_refs: 14
+    price: {"1K": 0.0336, "2K": 0.0504, "4K": 0.113}
+  nano-banana-2:
+    registry: google-nano-banana-2
+    api_model: gemini-3.1-flash-image
+    label: Nano Banana 2 (Flash)
+    note: fast
+    sizes: ["512", "1K", "2K", "4K"]
+    aspects: ["1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"]
+    max_refs: 14
+    price: {"512": 0.045, "1K": 0.067, "2K": 0.101, "4K": 0.151}
+  nano-banana-2-lite:
+    registry: google-nano-banana-2-lite
+    api_model: gemini-3.1-flash-lite-image
+    label: Nano Banana 2 Lite
+    note: fastest; weaker at edits
+    sizes: ["1K"]
+    max_refs: 3
+    price: {"1K": 0.0336}
+  nano-banana-pro:
+    registry: google-nano-banana-pro
+    api_model: gemini-3-pro-image
+    label: Nano Banana Pro
+    note: best quality; slowest
+    sizes: ["1K", "2K", "4K"]
+    max_refs: 14
+    price: {"1K": 0.134, "2K": 0.134, "4K": 0.24}
+  nano-banana:
+    registry: google-nano-banana
+    api_model: gemini-2.5-flash-image
+    label: Nano Banana (legacy)
+    note: retired by Google 2027-03-15
+    sizes: []        # 1024px only; sending image_size fails on this model
+    max_refs: 3
+    price: {"1K": 0.039}
+
 matting:
   birefnet:
     registry: birefnet

@@ -191,6 +191,9 @@ Each milestone is done only when its acceptance check passes. Update this file a
   Animate method buttons no longer carry long text, so the window fits 1280x720 (laptop at 150 % scaling).
   Progress: `@stage`/`@progress` markers are found anywhere in a line (a loading bar on stderr can share it),
   the last lines of a job are no longer dropped, and slicing has its own "cut" stage.
+- Follow-up (2026-11-13): Google Nano Banana as cloud base models (`docs/CLOUD_MODELS.md`): 2.1, 2 (Flash),
+  2 Lite, Pro and the legacy model through the Gemini API with the user's own key (Settings > Google AI, or
+  `ggs cloud key set`). Matting and QA stay local; BiRefNet runs on the CPU when there is no GPU.
 
 ## Open decisions for the owner
 - Hard rule 5 vs VFX: is brightness-as-alpha for additive particle textures acceptable? (It is how emissive

@@ -57,13 +57,14 @@ Target engines: **Unity, Godot and Defold** (all three, every exporter).
   (0.7GB peak), denoise peaks at 5.0GB, BiRefNet at 1.6GB, and each stage is unloaded before the next.
   SDXL on the same laptop: denoise 5.5GB (bf16 UNet + Lightning LoRA); style training at 1024px 3.8GB with the
   UNet Linears stored in fp8, 1.85 s/step (klein: 3.9 s/step at 512px).
-- `minimal` (<7GB) / `no-gpu`: unsupported for generation; `ggs doctor` explains why.
+- `minimal` (<7GB) / `no-gpu`: unsupported for local generation; `ggs doctor` explains why. Cloud base models
+  (Google Nano Banana, `docs/CLOUD_MODELS.md`) work on any profile: matting falls back to the CPU.
 
 ## Repo layout
 
 ```
 CLAUDE.md            this file
-docs/                ARCHITECTURE, ASSET_CLASSES, RIG_SPEC_V1, CLIP_FORMAT_V1, EXPORT_FORMATS, STYLE_TRAINING, PART_CUTTER, ANIMATION_V3,
+docs/                ARCHITECTURE, ASSET_CLASSES, RIG_SPEC_V1, CLIP_FORMAT_V1, EXPORT_FORMATS, STYLE_TRAINING, PART_CUTTER, ANIMATION_V3, CLOUD_MODELS,
                      MODELS_AND_LICENSES, LICENSE_REVIEW, ROADMAP, KICKOFF
 rigs/                machine-readable rig specs (YAML) — source of truth for bones/parts/sockets
 models/registry.yaml model/LoRA/motion registry with license + VRAM metadata
@@ -110,6 +111,8 @@ python -m ggs generate --class held_item --prompt "a steel longsword" --out swor
 python -m ggs clip keys clips/swing_one_hand.yaml --out swing.json; python -m ggs clip layer cycle.json --over swing.json --bones near_arm --out walk_swing.json
 python -m ggs export walk_swing.json --character chars/knight/character.yaml --item items/sword --format godot --out build/knight
 python -m ggs generate --class tile --prompt "grey cobblestone" --out tiles/cobble.png   # also background, background_wrap, ui_panel, ui_icon, vfx
+python -m ggs cloud key set; python -m ggs cloud key check   # Google AI Studio key (DPAPI-encrypted in ~/.ggs)
+python -m ggs generate --class sprite --prompt "a lantern" --model nano-banana-pro --out l.png  # cloud base model
 python -m ggs ui            # desktop app (pip install -e ".[ui]"); same commands underneath
 python -m ggs models status; python -m ggs models fetch required   # first-run model packs (models/downloads.yaml)
 .venv\Scripts\python tools\build_app.py   # standalone app folder dist/GGS (portable Python + CUDA torch, no models)

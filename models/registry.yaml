@@ -305,3 +305,43 @@ entries:
     source: https://zenodo.org/record/8127870
     notes: "Attribution required: 'The 100STYLE Dataset - Ian Mason'. Bundled as converted 2D loops in
       motions/catalogs/100style.zip."
+
+  - id: google-nano-banana-2.1
+    kind: cloud
+    name: Google Nano Banana 2.1 (gemini-nano-banana-2.1)
+    license: Gemini API Additional Terms of Service (hosted service)
+    commercial: "verify"
+    source: https://aistudio.google.com/docs/models
+    notes: "Google-hosted (Gemini API), used only with the user's own API key; nothing is bundled or downloaded. Terms: Google APIs Terms of Service + Gemini API Additional Terms (paid tier). Output ownership and commercial use of generated images NOT yet checked against the terms text; outputs carry a SynthID watermark. Opt-in, never default."
+
+  - id: google-nano-banana-2
+    kind: cloud
+    name: Google Nano Banana 2 (gemini-3.1-flash-image)
+    license: Gemini API Additional Terms of Service (hosted service)
+    commercial: "verify"
+    source: https://aistudio.google.com/docs/models
+    notes: "Google-hosted (Gemini API), used only with the user's own API key; nothing is bundled or downloaded. Terms: Google APIs Terms of Service + Gemini API Additional Terms (paid tier). Output ownership and commercial use of generated images NOT yet checked against the terms text; outputs carry a SynthID watermark. Opt-in, never default."
+
+  - id: google-nano-banana-2-lite
+    kind: cloud
+    name: Google Nano Banana 2 Lite (gemini-3.1-flash-lite-image)
+    license: Gemini API Additional Terms of Service (hosted service)
+    commercial: "verify"
+    source: https://aistudio.google.com/docs/models
+    notes: "Google-hosted (Gemini API), used only with the user's own API key; nothing is bundled or downloaded. Terms: Google APIs Terms of Service + Gemini API Additional Terms (paid tier). Output ownership and commercial use of generated images NOT yet checked against the terms text; outputs carry a SynthID watermark. Opt-in, never default."
+
+  - id: google-nano-banana-pro
+    kind: cloud
+    name: Google Nano Banana Pro (gemini-3-pro-image)
+    license: Gemini API Additional Terms of Service (hosted service)
+    commercial: "verify"
+    source: https://aistudio.google.com/docs/models
+    notes: "Google-hosted (Gemini API), used only with the user's own API key; nothing is bundled or downloaded. Terms: Google APIs Terms of Service + Gemini API Additional Terms (paid tier). Output ownership and commercial use of generated images NOT yet checked against the terms text; outputs carry a SynthID watermark. Opt-in, never default."
+
+  - id: google-nano-banana
+    kind: cloud
+    name: Google Nano Banana, legacy (gemini-2.5-flash-image; shutdown 2027-03-15)
+    license: Gemini API Additional Terms of Service (hosted service)
+    commercial: "verify"
+    source: https://aistudio.google.com/docs/models
+    notes: "Google-hosted (Gemini API), used only with the user's own API key; nothing is bundled or downloaded. Terms: Google APIs Terms of Service + Gemini API Additional Terms (paid tier). Output ownership and commercial use of generated images NOT yet checked against the terms text; outputs carry a SynthID watermark. Opt-in, never default."

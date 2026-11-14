@@ -43,12 +43,15 @@ def run_asset(recipe: Recipe, description: str, out: Path, *, model: str, seeds:
     else:
         raise ValueError(f"recipe kind {recipe.kind!r} is not implemented")
     results, extra = run(**kw)
+    from ggs.pipeline.cloud import cost as cloud_cost
+
     meta = {
         "generator": f"ggs {__version__}", "class": recipe.id, "kind": recipe.kind, "model": model,
         "profile": profile, "description": description, "style": style,
         "style_package": None if style_meta is None else {"name": style_meta.name, "trigger": style_meta.trigger,
                                                           "weight": lora_scale},
         "size": list(size), "seconds": round(time.perf_counter() - t0, 2), "stages": stages.summary(),
+        "cloud": cloud_cost(gen, *size),
         "assets": [{"seed": r.seed, "file": r.path.name if r.path else None, "passed": r.passed, "size": r.size,
                     "failures": r.failures, "qa": r.qa} for r in results],
         **extra,

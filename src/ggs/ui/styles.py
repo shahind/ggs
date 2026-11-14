@@ -74,7 +74,12 @@ class StylesSection(QWidget):
         f.addRow("Images", self.src)
         f.addRow("Style name", self.name)
         self.model = QComboBox()
-        self.model.addItem(f"Project's ({base_model or 'flux2-klein-4b'})", None)
+        from ggs.pipeline.cloud import is_cloud
+
+        if not is_cloud(base_model):  # styles train on this computer: a cloud project picks a local model here
+            self.model.addItem(f"Project's ({base_model or 'flux2-klein-4b'})", None)
+        else:
+            self.model.setToolTip("Styles train on this computer's GPU; Nano Banana cannot load them")
         for m in models:
             self.model.addItem(m, m)
         f.addRow("Drawing model", self.model)

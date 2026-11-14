@@ -34,9 +34,19 @@ ROLE_CLIP = 258
 
 
 def _pipelines() -> list[str]:
+    """Local base models (these can also train styles)."""
     from ggs.pipeline.models import load_pipelines
 
     return sorted(load_pipelines().pipelines)
+
+
+def base_models() -> list[tuple[str, str]]:
+    """(id, label) of every base model for drawing: the local ones, then Google's Nano Banana models."""
+    from ggs.pipeline.models import load_pipelines
+
+    spec = load_pipelines()
+    return ([(m, MODEL_LABELS.get(m, m)) for m in sorted(spec.pipelines)]
+            + [(m, f"{s.label} - Google cloud") for m, s in spec.cloud.items()])
 
 
 def _styles(project: Path) -> list[str]:
@@ -70,8 +80,10 @@ class ProjectView(QWidget):
         top.addStretch(1)
         top.addWidget(QLabel("Base model"))
         self.model = QComboBox()
-        for m in _pipelines():
-            self.model.addItem(MODEL_LABELS.get(m, m), m)
+        for m, label in base_models():
+            self.model.addItem(label, m)
+        self.model.setToolTip("What draws this project's characters and assets. Google cloud models need an "
+                              "API key (Settings) and are billed by Google per image.")
         self.model.currentIndexChanged.connect(self._model_changed)
         top.addWidget(self.model)
         settings = QPushButton()
@@ -172,8 +184,19 @@ class ProjectView(QWidget):
             self.tree.setCurrentItem(target)
 
     def _model_changed(self) -> None:
+        from ggs.pipeline.cloud import is_cloud
+
         meta = self.meta()
-        meta["base_model"] = self.model.currentData()
+        chosen = self.model.currentData()
+        if is_cloud(chosen):
+            from ggs.ui.cloud_key import ensure_key
+
+            if not ensure_key(self.queue, self, chosen):  # no key: stay on the model the project had
+                self.model.blockSignals(True)
+                self.model.setCurrentIndex(max(0, self.model.findData(meta.get("base_model") or "flux2-klein-4b")))
+                self.model.blockSignals(False)
+                return
+        meta["base_model"] = chosen
         (self.project / ".ggs" / "project.yaml").write_text(yaml.safe_dump(meta, sort_keys=False), encoding="utf-8")
 
     # ------------------------------------------------------------------ navigation

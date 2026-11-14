@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from ggs.ui import commands as C
+from ggs.ui.icons import set_icon
 from ggs.ui.jobs import Job, JobQueue
 from ggs.ui.widgets import PathPicker
 
@@ -42,6 +43,20 @@ class SettingsDialog(QDialog):
         row.addWidget(self.pick, 1)
         row.addWidget(add)
         lay.addLayout(row)
+        t3 = QLabel("Google AI")
+        t3.setObjectName("h2")
+        lay.addWidget(t3)
+        row3 = QHBoxLayout()
+        self.cloud = QLabel()
+        self.cloud.setWordWrap(True)
+        self.cloud.setObjectName("muted")
+        cloud = QPushButton("API Key...")
+        set_icon(cloud, "key")
+        cloud.setToolTip("Nano Banana models: draw on Google's servers with your own API key")
+        cloud.clicked.connect(self._cloud)
+        row3.addWidget(self.cloud, 1)
+        row3.addWidget(cloud)
+        lay.addLayout(row3)
         t2 = QLabel("System")
         t2.setObjectName("h2")
         lay.addWidget(t2)
@@ -60,6 +75,18 @@ class SettingsDialog(QDialog):
         close.clicked.connect(self.accept)
         lay.addWidget(close)
         self._load_dirs()
+        self._cloud_status()
+
+    def _cloud_status(self) -> None:
+        from ggs.ui.cloud_key import key_status
+
+        self.cloud.setText("Nano Banana (Flash to Pro). " + key_status()[1])
+
+    def _cloud(self) -> None:
+        from ggs.ui.cloud_key import GoogleKeyDialog
+
+        GoogleKeyDialog(self.queue, self).exec()
+        self._cloud_status()
 
     def _load_dirs(self) -> None:
         from ggs.pipeline.models import model_dirs

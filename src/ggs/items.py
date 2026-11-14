@@ -327,7 +327,12 @@ def _start_progress(rec: ItemRecord, model: str) -> None:
     from ggs.pipeline import progress
 
     kind = "character" if rec.asset_class == "character" else rec.asset_class
-    plan = ["encode", "denoise", "decode", "matte"] if model == "sdxl" else ["encode", "denoise", "matte"]
+    from ggs.pipeline.cloud import is_cloud
+
+    if is_cloud(model):
+        plan = ["cloud", "matte"]
+    else:
+        plan = ["encode", "denoise", "decode", "matte"] if model == "sdxl" else ["encode", "denoise", "matte"]
     progress.start(f"{kind}:{model}", plan)
 
 

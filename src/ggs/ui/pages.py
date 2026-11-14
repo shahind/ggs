@@ -220,8 +220,10 @@ class GeneratePage(QWidget):
             self.style.addItem(s, s)
         self.model.clear()
         self.model.addItem(f"(project default: {self.state.base_model() or 'recipe default'})", None)
-        for m in _pipelines():
-            self.model.addItem(m, m)
+        from ggs.ui.project_view import base_models
+
+        for m, label in base_models():
+            self.model.addItem(label, m)
 
     def _run(self) -> None:
         if not _need_project(self, self.state):
