@@ -3,7 +3,7 @@
 0. Run `.\setup-claude.ps1` once. It copies `claude-config\` (agents, skills, settings) into `.claude\`.
    (The files were created through a bridge that cannot write into `.claude`, so this step is manual.)
    After that, `claude-config\` is only a backup and can be deleted.
-1. Open a terminal in `C:\Users\sdarvish\Documents\GGS`, create the venv (see README), run `claude`.
+1. Open a terminal in the project folder, run `setup.cmd` (see README), run `claude`.
 2. `/agents` should list: rig-engineer, pipeline-engineer, lora-trainer, export-engineer, qa-reviewer, license-auditor.
 3. First prompt to paste:
 

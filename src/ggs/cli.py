@@ -21,7 +21,8 @@ PROFILE_HELP = {
     "standard": "Full local workflow (generation and style-LoRA training).",
     "lite": "Quantized inference; train at 512px only, or export the dataset for cloud training.",
     "minimal": "Not enough VRAM for generation. Use a cloud runner.",
-    "no-gpu": "No NVIDIA GPU found. Generation is unsupported.",
+    "no-gpu": "No NVIDIA GPU found. Local drawing models need one; draw with a Google cloud model instead "
+              "(ggs cloud key set, or Settings > Google AI in the app).",
 }
 
 
@@ -1074,15 +1075,43 @@ def cmd_asset_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def _needed_packs(packs: dict) -> list[str]:
+    """Required packs this computer can run (no CUDA-only packs without an NVIDIA GPU; a Google key stands in for
+    the local drawing model)."""
+    from ggs.pipeline.cloud import CloudError, key_source
+    from ggs.pipeline.download import required_packs
+
+    try:
+        cloud = key_source() is not None
+    except CloudError:
+        cloud = False
+    return required_packs(packs, cuda=detect_vram_gb() is not None, cloud=cloud)
+
+
+def cmd_motion_fetch(_: argparse.Namespace) -> int:
+    from ggs.pipeline.download import fetch_library, library_ready
+
+    print("@stage download_motions", flush=True)
+    try:
+        got = fetch_library(progress=lambda m: print(m, flush=True))
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    print("motion library: " + ("downloaded" if got else "already here" if library_ready() else "missing"))
+    return 0
+
+
 def cmd_models_status(args: argparse.Namespace) -> int:
     from ggs.pipeline.download import load_packs, pack_ready
 
+    packs = load_packs()
+    needed = _needed_packs(packs)
     missing_required = False
-    for name, pack in load_packs().items():
+    for name, pack in packs.items():
         ok = pack_ready(pack)
-        missing_required |= pack.required and not ok
-        need = "required" if pack.required else "optional"
-        print(f"{name:10} {'ready  ' if ok else 'missing'} {pack.size_gb:5.1f} GB  {need:8}  {pack.label}")
+        missing_required |= name in needed and not ok
+        need = "required" if name in needed else "needs GPU" if pack.needs_cuda and pack.required else "optional"
+        print(f"{name:10} {'ready  ' if ok else 'missing'} {pack.size_gb:5.1f} GB  {need:9}  {pack.label}")
     return 1 if missing_required else 0
 
 
@@ -1090,7 +1119,7 @@ def cmd_models_fetch(args: argparse.Namespace) -> int:
     from ggs.pipeline.download import fetch_pack, load_packs, pack_ready
 
     packs = load_packs()
-    names = [n for n, p in packs.items() if p.required] if args.pack == "required" else [args.pack]
+    names = _needed_packs(packs) if args.pack == "required" else [args.pack]
     for n in names:
         if n not in packs:
             print(f"ERROR: unknown model pack {n!r}; known: {sorted(packs)}", file=sys.stderr)
@@ -1425,7 +1454,8 @@ def build_parser() -> argparse.ArgumentParser:
     mst = models.add_parser("status", help="which model packs are ready (exit 1 if a required one is missing)")
     mst.set_defaults(func=cmd_models_status)
     mf = models.add_parser("fetch", help="download a model pack into ~/.ggs/models (resumable)")
-    mf.add_argument("pack", help="pack name from models/downloads.yaml, or 'required'")
+    mf.add_argument("pack", help="pack name from models/downloads.yaml, or 'required' (what this computer needs "
+                                 "and can run)")
     mf.set_defaults(func=cmd_models_fetch)
     ck = models.add_parser("check", help="show which files each pipeline would load")
     ck.add_argument("--profile", choices=["standard", "lite"], default=None)
@@ -1620,6 +1650,8 @@ def build_parser() -> argparse.ArgumentParser:
     mm.add_argument("--rig", default=str(DEFAULT_RIG))
     mm.add_argument("--out", required=True, help="clip .json")
     mm.set_defaults(func=cmd_motion_make)
+    mo.add_parser("fetch", help="download the motion library (catalogs and starter clips) if it is missing"
+                  ).set_defaults(func=cmd_motion_fetch)
     ml = mo.add_parser("library", help="list the starter animation library")
     ml.add_argument("--json", action="store_true")
     ml.set_defaults(func=cmd_motion_library)

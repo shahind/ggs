@@ -34,6 +34,15 @@ class Pack(BaseModel):
     size_gb: float = 0.0
     ready_when: dict[str, list[str]] = Field(default_factory=dict)
     parts: list[Part]
+    needs_cuda: bool = False  # runs only on an NVIDIA GPU: not offered on a Mac or a PC without one
+
+
+class Library(BaseModel):
+    """The motion library zip (a release download; tools/pack_motions.py)."""
+
+    url: str
+    size: int = Field(gt=0)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 def _manifest(path: Path | None = None) -> tuple[Path, dict]:
@@ -50,6 +59,71 @@ def load_packs(path: Path | None = None) -> dict[str, Pack]:
         return {k: Pack.model_validate(v) for k, v in data.get("packs", {}).items()}
     except Exception as exc:
         raise ValueError(f"{path}: {exc}") from exc
+
+
+def load_library(path: Path | None = None) -> Library | None:
+    path, data = _manifest(path)
+    if not data.get("library"):
+        return None
+    try:
+        return Library.model_validate(data["library"])
+    except Exception as exc:
+        raise ValueError(f"{path}: library: {exc}") from exc
+
+
+def required_packs(packs: dict[str, Pack], cuda: bool, cloud: bool) -> list[str]:
+    """The packs this computer needs: required ones it can run. A Google API key stands in for the local
+    drawing model (``CLOUD_REPLACES``)."""
+    return [n for n, p in packs.items()
+            if p.required and (cuda or not p.needs_cuda) and not (cloud and n in CLOUD_REPLACES)]
+
+
+CLOUD_REPLACES = ("drawing",)
+
+
+def library_ready(root: Path | None = None) -> bool:
+    m = (root or repo_root()) / "motions"
+    return any((m / "catalogs").glob("*.zip")) and any((m / "clips").glob("*.json"))
+
+
+def fetch_library(root: Path | None = None, progress=print, lib: Library | None = None) -> bool:
+    """Download and unpack the motion library into ``<root>/motions`` unless it is there. True if fetched."""
+    import hashlib
+    import zipfile
+
+    root = root or repo_root()
+    if library_ready(root):
+        return False
+    lib = lib or load_library()
+    if lib is None:
+        raise OSError("models/downloads.yaml has no motion library download")
+    zpath = shared_dir() / "cache" / Path(lib.url).name
+    state = {"done": zpath.stat().st_size if zpath.exists() else 0, "last": -1}
+
+    def tick(n: int) -> None:
+        state["done"] += n
+        pct = int(100 * state["done"] / lib.size)
+        if pct != state["last"]:
+            state["last"] = pct
+            progress(f"@progress {min(pct, 100)}")
+
+    progress(f"fetching the motion library ({lib.size / 2**20:.0f} MB)")
+    fetch_file(lib.url, zpath, lib.size, on_bytes=tick)
+    h = hashlib.sha256()
+    with open(zpath, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    if h.hexdigest() != lib.sha256:
+        zpath.unlink()
+        raise OSError(f"the motion library download is damaged (checksum {h.hexdigest()[:12]}...); run it again")
+    with zipfile.ZipFile(zpath) as z:
+        for name in z.namelist():
+            if not name.startswith("motions/") or ".." in Path(name).parts:
+                raise OSError(f"unexpected file in the motion library zip: {name}")
+        z.extractall(root)
+    zpath.unlink()
+    progress("@progress 100")
+    return True
 
 
 def bundled_files(path: Path | None = None) -> list[str]:

@@ -82,6 +82,7 @@ tests/               pytest
 ## Commands
 
 ```
+setup.cmd                        # starter (macOS/Linux: ./setup.sh): uv -> Python 3.13 + libraries + motion library in .venv
 pip install -e ".[dev]"          # core + tests
 pip install -e ".[dev,image]"    # + pillow/numpy
 pip install -e ".[dev,image,gpu]"# + torch/diffusers (install the CUDA build of torch first on Windows)
@@ -117,6 +118,8 @@ python -m ggs ui            # desktop app (pip install -e ".[ui]"); same command
 python -m ggs models status; python -m ggs models fetch required   # first-run model packs (models/downloads.yaml)
 .venv\Scripts\python tools\build_app.py   # standalone app folder dist/GGS (portable Python + CUDA torch, no models)
 ISCC tools\installer.iss                   # -> dist/GGS-Setup-<ver>.exe (+ .bin slices), per-user install
+python tools\stage_app.py --windows; ISCC tools\installer_web.iss   # small installer that downloads the rest (--mac: .dmg)
+python -m ggs motion fetch                  # motion library from the GitHub release (not in git)
 python -m ggs export cycle.json --character chars/pa/character.yaml --format apng --out walk.png  # or webp|gif|sheet|rig
 python -m ggs motion make --prompt "A person waves." --seconds 2 --count 2 --out clips/wave.json   # Kimodo text->clip
 python -m ggs motion catalog walk angry; python -m ggs motion add walk cmu/02_01 100style/Angry_FW --project <dir>

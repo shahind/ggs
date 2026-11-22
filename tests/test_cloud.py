@@ -255,10 +255,13 @@ def test_a_key_replaces_the_drawing_pack_in_setup():
     pytest.importorskip("PySide6")
     from ggs.ui.setup import needed
 
-    pack = SimpleNamespace(required=True)
-    assert needed("drawing", pack, cloud=False) and not needed("drawing", pack, cloud=True)
-    assert needed("cutout", pack, cloud=True)  # matting still runs on this computer
-    assert not needed("sdxl", SimpleNamespace(required=False), cloud=False)
+    pack = SimpleNamespace(required=True, needs_cuda=False)
+    gpu_pack = SimpleNamespace(required=True, needs_cuda=True)
+    assert needed("drawing", gpu_pack, cloud=False, cuda=True)
+    assert not needed("drawing", gpu_pack, cloud=True, cuda=True)
+    assert not needed("drawing", gpu_pack, cloud=False, cuda=False)  # a Mac / no NVIDIA GPU: cannot run it
+    assert needed("cutout", pack, cloud=True, cuda=False)  # matting still runs on this computer
+    assert not needed("sdxl", SimpleNamespace(required=False, needs_cuda=True), cloud=False, cuda=True)
 
 
 def test_character_design_sends_the_pose_guide(tmp_path, fake_cloud):

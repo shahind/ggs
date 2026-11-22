@@ -1,0 +1,99 @@
+# Tests on Windows and macOS, then the small installers (they download Python, the libraries and the models
+# during setup). Push a tag like v0.1.0 to publish them on a GitHub release; "Run workflow" builds them as
+# downloadable artifacts only.
+name: installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.9"
+      - name: Set up GGS the way users do (CPU torch on the runner)
+        run: uv run --no-project --python 3.13 tools/setup_env.py --cpu
+      - name: Tests (GPU tests are skipped)
+        shell: bash
+        run: |
+          PY=.venv/bin/python; [ -f .venv/Scripts/python.exe ] && PY=.venv/Scripts/python.exe
+          QT_QPA_PLATFORM=offscreen "$PY" -m pytest -q
+          for f in rigs/humanoid_*.yaml; do "$PY" -m ggs rig validate "$f"; done
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Stage the app (source, data, uv, icon)
+        run: |
+          python -m pip install --quiet PySide6-Essentials pillow
+          python tools/stage_app.py --windows
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc tools\installer_web.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GGS-windows
+          path: dist/GGS-Setup-*.exe
+
+  macos:
+    needs: test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Build GGS.app and the disk image
+        run: |
+          python -m pip install --quiet PySide6-Essentials pillow
+          python tools/stage_app.py --mac
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GGS-macos
+          path: dist/GGS-*-macos-arm64.dmg
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" out/* --repo "${GITHUB_REPOSITORY}" --title "GGS ${GITHUB_REF_NAME}" \
+            --notes "Windows: run GGS-Setup-*.exe (it downloads Python, the libraries and, if ticked, the AI models).
+          macOS (Apple Silicon, macOS 14+): open the .dmg, drag GGS to Applications, then right-click GGS > Open the first time (the app is not signed). The first start sets everything up in Terminal.
+          See the README for details."

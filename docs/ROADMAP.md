@@ -194,6 +194,12 @@ Each milestone is done only when its acceptance check passes. Update this file a
 - Follow-up (2026-11-13): Google Nano Banana as cloud base models (`docs/CLOUD_MODELS.md`): 2.1, 2 (Flash),
   2 Lite, Pro and the legacy model through the Gemini API with the user's own key (Settings > Google AI, or
   `ggs cloud key set`). Matting and QA stay local; BiRefNet runs on the CPU when there is no GPU.
+- Follow-up (2026-11-22): published at github.com/shahind/ggs. Large files stay out of git: models from Hugging
+  Face, the motion library from the `motions-v1` release (`ggs motion fetch`, `tools/pack_motions.py`). Starter
+  `setup.cmd` / `setup.sh` (uv + `tools/setup_env.py`, tested versions in `requirements/constraints.txt`). Small
+  installers that download the rest: Windows (`tools/stage_app.py --windows` + `tools/installer_web.iss`) and
+  macOS (`--mac`: GGS.app in a .dmg, Apple Silicon); built and released by `.github/workflows/installers.yml`.
+  Packs marked `needs_cuda` are not offered without an NVIDIA GPU.
 
 ## Open decisions for the owner
 - Hard rule 5 vs VFX: is brightness-as-alpha for additive particle textures acceptable? (It is how emissive

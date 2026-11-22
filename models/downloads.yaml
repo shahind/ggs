@@ -7,9 +7,17 @@
 bundled:
   - SDXL-Lightning/sdxl_lightning_8step_lora.safetensors   # 394 MB, openrail++
 
+# The motion library (catalogs of CMU / 100STYLE loops, the starter clips): generated files, not in git, attached
+# to a GitHub release (tools/pack_motions.py). `ggs motion fetch` downloads and unpacks it into motions/.
+library:
+  url: https://github.com/shahind/ggs/releases/download/motions-v1/ggs-motions-v1.zip
+  size: 29757024
+  sha256: fbaaf3f040917c8aa1ada623a7f885e920374828ce20b134514df02bafaab6b2
+
 packs:
   drawing:
     label: Drawing model (FLUX.2 klein 4B)
+    needs_cuda: true
     why: Draws every asset and character.
     required: true
     size_gb: 10.1
@@ -39,6 +47,7 @@ packs:
         include: ["*.json", "model.safetensors"]
   layers:
     label: Layer splitter (See-through, optional)
+    needs_cuda: true
     why: Splits a character into complete layers (arms, shirt, trousers, boots, face, hair) for clean pieces.
     required: false
     size_gb: 3.6
@@ -49,6 +58,7 @@ packs:
         include: ["*"]
   frames_o2a:
     label: Frame animator (One-to-All, optional)
+    needs_cuda: true
     why: Draws a character's animation frame by frame from the design and the animation's skeleton.
     required: false
     size_gb: 18.1
@@ -66,6 +76,7 @@ packs:
         include: ["split_files/text_encoders/umt5_xxl_fp16.safetensors"]
   frames:
     label: Frame animator (AnimateDiff + OpenPose, optional)
+    needs_cuda: true
     why: Draws a character's animation frame by frame, following the skeleton and keeping the design.
     required: false
     size_gb: 6.2
@@ -89,7 +100,8 @@ packs:
                   "models/image_encoder/model.safetensors"]
   sdxl:
     label: SDXL (optional second drawing model)
-    why: Faster style training; a different look. (Its 8-step Lightning LoRA comes with the installer.)
+    needs_cuda: true
+    why: Faster style training; a different look.
     required: false
     size_gb: 7.0
     ready_when: {pipelines: [sdxl]}
@@ -103,11 +115,15 @@ packs:
       - repo: madebyollin/sdxl-vae-fp16-fix
         dir: sdxl-vae-fp16-fix
         include: [config.json, diffusion_pytorch_model.safetensors]
+      - repo: ByteDance/SDXL-Lightning                    # 394 MB: 8-step drawing (bundled by build_app.py)
+        dir: SDXL-Lightning
+        include: [sdxl_lightning_8step_lora.safetensors]
       - repo: TencentARC/t2i-adapter-openpose-sdxl-1.0   # 316 MB: draws characters in the chosen pose
         dir: t2i-adapter-openpose-sdxl-1.0
         include: [config.json, diffusion_pytorch_model.safetensors]
   captioner:
     label: Image describer (Qwen3-VL 2B)
+    needs_cuda: true
     why: Only needed to train your own styles.
     required: false
     size_gb: 4.0
@@ -118,6 +134,7 @@ packs:
         include: ["*.json", "*.safetensors", "*.txt", "*.jinja"]
   motion:
     label: Motion model (NVIDIA Kimodo)
+    needs_cuda: true
     why: Makes new animations; on its own it varies the library's motions (new takes, other lengths).
     required: false
     size_gb: 1.06
@@ -128,6 +145,7 @@ packs:
         include: ["*"]
   motion_text:
     label: Motion text reader (Llama 3 8B + LLM2Vec)
+    needs_cuda: true
     why: Lets you describe any new animation in words. Needs 16 GB of system memory.
     required: false
     size_gb: 15.3

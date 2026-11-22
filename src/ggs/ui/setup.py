@@ -32,20 +32,21 @@ def pack_status() -> list[tuple[str, object, bool]]:
     return [(n, p, pack_ready(p)) for n, p in load_packs().items()]
 
 
-CLOUD_REPLACES = ("drawing",)  # packs a Google API key stands in for (Nano Banana draws instead)
+def _cuda() -> bool:
+    from ggs.hardware import detect_vram_gb
+
+    return detect_vram_gb() is not None
 
 
-def needed(name: str, pack, cloud: bool | None = None) -> bool:
-    """A required pack, unless a Google key is set and the pack is the local drawing model."""
-    if not pack.required:
-        return False
-    if name in CLOUD_REPLACES:
-        if cloud is None:
-            from ggs.ui.cloud_key import has_key
+def needed(name: str, pack, cloud: bool | None = None, cuda: bool | None = None) -> bool:
+    """A pack this computer must have: required, runnable here, and not replaced by a Google API key."""
+    from ggs.pipeline.download import required_packs
 
-            cloud = has_key()
-        return not cloud
-    return True
+    if cloud is None:
+        from ggs.ui.cloud_key import has_key
+
+        cloud = has_key()
+    return name in required_packs({name: pack}, _cuda() if cuda is None else cuda, cloud)
 
 
 def missing_required() -> bool:
@@ -112,8 +113,10 @@ class ModelSetupDialog(QDialog):
         self.rows: list[PackRow] = []
         from ggs.ui.cloud_key import has_key
 
-        cloud = has_key()
+        cloud, cuda = has_key(), _cuda()
         for name, pack, ready in pack_status():
+            if pack.needs_cuda and not cuda:  # cannot run here (a Mac, or a PC without an NVIDIA GPU)
+                continue
             row = PackRow(name, pack, ready, cloud)
             row.pick.toggled.connect(self._update)
             self.rows.append(row)
@@ -165,7 +168,7 @@ class ModelSetupDialog(QDialog):
         cloud = has_key()
         for r in self.rows:
             r.required = needed(r.name, r.pack, cloud)
-            if r.name in CLOUD_REPLACES and cloud and not r.ready:
+            if not r.required and not r.ready:
                 r.pick.setChecked(False)
         self._update()
 

@@ -40,8 +40,11 @@ class MainWindow(QMainWindow):
 
     def check_models(self) -> None:
         """First run: offer to download the AI models when a required one is missing."""
+        from ggs.pipeline.download import library_ready
         from ggs.ui.setup import ModelSetupDialog, missing_required
 
+        if not library_ready():  # a fresh checkout or an interrupted setup: get the animations in the background
+            self.queue.submit(Job("Download motion library", [C.motion_fetch()], exit_ok=(0, 1)))
         if missing_required():
             ModelSetupDialog(self.queue, self).exec()
 

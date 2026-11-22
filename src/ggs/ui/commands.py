@@ -243,6 +243,10 @@ def models_check() -> list[str]:
     return [*GGS, "models", "check"]
 
 
+def motion_fetch() -> list[str]:
+    return [*GGS, "motion", "fetch"]
+
+
 def cloud_key_check(model: str) -> list[str]:
     return [*GGS, "cloud", "key", "check", "--model", model]
 

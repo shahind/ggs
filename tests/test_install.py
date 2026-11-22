@@ -108,7 +108,8 @@ def test_bundled_loras_are_found_in_the_app_models_folder(monkeypatch, tmp_path)
 
     files = D.bundled_files()
     assert "SDXL-Lightning/sdxl_lightning_8step_lora.safetensors" in files
-    assert not any(p.repo == "ByteDance/SDXL-Lightning" for pk in D.load_packs().values() for p in pk.parts)
+    # the full installer bundles it; the small installers download it with the SDXL pack
+    assert any(p.repo == "ByteDance/SDXL-Lightning" for p in D.load_packs()["sdxl"].parts)
     monkeypatch.setenv("GGS_ROOT", str(tmp_path))
     assert model_dirs()[-1] == tmp_path / "models"
     lora = tmp_path / "models" / files[0]
