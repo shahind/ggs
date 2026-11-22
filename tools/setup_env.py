@@ -156,9 +156,6 @@ def setup(a: argparse.Namespace) -> int:
     start = (f'"{env_dir / "Scripts" / "pythonw.exe"}" -m ggs.ui.app' if os.name == "nt"
              else f'"{py}" -m ggs.ui.app')
     print(f"Start the app with:\n  {start}")
-    cache = os.environ.get("UV_CACHE_DIR")
-    if a.app and cache and Path(cache).resolve().is_relative_to(root):  # installed app: drop the download cache
-        subprocess.run([uv, "cache", "clean"], check=False, capture_output=True)
     return 0
 
 

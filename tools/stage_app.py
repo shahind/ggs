@@ -132,7 +132,10 @@ set "UV_PYTHON_INSTALL_DIR=%~dp0python"
 set "UV_CACHE_DIR=%~dp0.uv-cache"
 set "UV_PYTHON_PREFERENCE=only-managed"
 "%~dp0uv.exe" run --no-project --python 3.13 "%~dp0tools\setup_env.py" --app --root "%~dp0." --pause %*
-exit /b %ERRORLEVEL%
+set "RESULT=%ERRORLEVEL%"
+rem the download cache (several GB) is not needed once the environment is built; uv run held it until now
+"%~dp0uv.exe" cache clean >nul 2>&1
+exit /b %RESULT%
 """
 START_CMD = r"""@echo off
 if not exist "%~dp0env\Scripts\pythonw.exe" call "%~dp0Repair GGS.cmd" || exit /b 1
@@ -182,7 +185,10 @@ mkdir -p "$ROOT"
 rsync -a --delete --exclude /env --exclude /python --exclude /.uv-cache --exclude /.setup_ok \\
   --exclude /motions/catalogs --exclude /motions/clips --exclude /motions/embeds "$RES/app/" "$ROOT/"
 export UV_PYTHON_INSTALL_DIR="$ROOT/python" UV_CACHE_DIR="$ROOT/.uv-cache" UV_PYTHON_PREFERENCE=only-managed
-if "$RES/uv" run --no-project --python 3.13 "$ROOT/tools/setup_env.py" --app --root "$ROOT" --models required; then
+"$RES/uv" run --no-project --python 3.13 "$ROOT/tools/setup_env.py" --app --root "$ROOT" --models required
+OK=$?
+"$RES/uv" cache clean >/dev/null 2>&1  # the download cache is not needed once the environment is built
+if [ "$OK" = 0 ]; then
   echo
   echo "GGS is ready. Starting it..."
   open "$APP"
